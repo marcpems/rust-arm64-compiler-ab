@@ -155,12 +155,22 @@ impl Bootstrap {
         Self { cmd, metrics_path }
     }
 
-    pub fn llvm_pgo_instrument(mut self, profile_dir: &Utf8Path) -> Self {
-        self.cmd = self.cmd.arg("--set").arg(format!(
+    pub fn llvm_pgo_instrument(
+        env: &Environment,
+        profile_dir: &Utf8Path,
+        rustc_profile: &RustcPGOProfile,
+    ) -> Self {
+        let mut builder = Self::build(env);
+        builder.cmd = builder.cmd.arg("--set").arg(format!(
             r#"pgo.llvm.generate="{}""#,
             normalize_path(&profile_dir.join("prof-%p")).as_str()
         ));
-        self
+        if env.supports_shared_llvm() {
+            builder.avoid_rustc_rebuild()
+        } else {
+            // Training must execute the instrumented LLVM linked into rustc.
+            builder.rustc_pgo_optimize(rustc_profile).rustc_rebuild()
+        }
     }
 
     pub fn llvm_pgo_optimize(mut self, profile: Option<&LlvmPGOProfile>) -> Self {
@@ -314,5 +324,59 @@ fn add_shared_x_flags(env: &Environment, cmd: CmdBuilder) -> CmdBuilder {
             .arg("rust.deny-warnings=false")
     } else {
         cmd
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+    use crate::environment::EnvironmentBuilder;
+
+    #[test]
+    fn llvm_training_rebuilds_only_static_rustc() {
+        for (host, shared, cranelift) in [
+            ("x86_64-unknown-linux-gnu", true, true),
+            ("aarch64-unknown-linux-gnu", true, true),
+            ("x86_64-pc-windows-msvc", false, true),
+            ("aarch64-pc-windows-msvc", false, false),
+        ] {
+            for fast_try_build in [false, true] {
+                let env = EnvironmentBuilder::default()
+                    .host_tuple(host.to_owned())
+                    .python_binary("python".to_owned())
+                    .checkout_dir(Utf8PathBuf::from("checkout"))
+                    .build_dir(Utf8PathBuf::from("build"))
+                    .artifact_dir(Utf8PathBuf::from("profiles"))
+                    .host_llvm_dir(Utf8PathBuf::from("clang"))
+                    .skipped_tests(vec![])
+                    .use_bolt(false)
+                    .shared_llvm(shared)
+                    .run_tests(true)
+                    .fast_try_build(fast_try_build)
+                    .build_llvm(true)
+                    .build()
+                    .unwrap();
+                let profile = RustcPGOProfile(Utf8PathBuf::from("profiles/rustc.profdata"));
+                let bootstrap =
+                    Bootstrap::llvm_pgo_instrument(&env, Utf8Path::new("profiles/llvm"), &profile);
+                let args = &bootstrap.cmd.args;
+                let kept_stages: Vec<_> = args
+                    .windows(2)
+                    .filter(|pair| pair[0] == "--keep-stage")
+                    .map(|pair| pair[1].as_str())
+                    .collect();
+                assert_eq!(kept_stages, if shared { vec!["0", "1"] } else { vec!["0"] });
+                assert!(
+                    args.iter().any(|arg| arg == r#"pgo.llvm.generate="profiles/llvm/prof-%p""#)
+                );
+                assert_eq!(
+                    args.iter().any(|arg| arg == r#"pgo.rustc.use="profiles/rustc.profdata""#),
+                    !shared
+                );
+                assert!(args.windows(2).any(|pair| pair == ["--host", host]));
+                assert!(args.windows(2).any(|pair| pair == ["--target", host]));
+                assert_eq!(env.supports_cranelift(), cranelift);
+            }
+        }
     }
 }
