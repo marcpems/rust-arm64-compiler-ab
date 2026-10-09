@@ -81,7 +81,7 @@ fn windows_msvc_distribution_optimizations() {
         let args = job.env["RUST_CONFIGURE_ARGS"].as_str().unwrap();
         let script = job.env["SCRIPT"].as_str().unwrap();
         for option in [
-            "--set llvm.thin-lto=true",
+            "--set llvm.thin-lto=false",
             "--set llvm.link-shared=false",
             "--set rust.lto=thin",
             "--enable-full-tools",
@@ -90,6 +90,8 @@ fn windows_msvc_distribution_optimizations() {
             assert!(args.contains(option), "{name}: missing {option}");
         }
         assert_eq!(job.env["PGO_HOST"].as_str(), Some(host));
+        assert!(!args.contains("lld-link"));
+        assert!(!args.contains("llvm-lib"));
         assert!(
             script.contains(
                 "opt-dist windows-ci -- python x.py dist bootstrap --include-default-paths"

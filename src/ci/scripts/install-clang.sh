@@ -44,13 +44,8 @@ if isWindows; then
     7z x -oclang-rust/ "LLVM-${LLVM_VERSION}-${suffix}.exe"
 
     if ! isKnownToBeMingwBuild; then
-        configure_args="${RUST_CONFIGURE_ARGS} --set llvm.clang-cl=$(pwd)/clang-rust/bin/clang-cl.exe"
-        if [[ -n "${PGO_HOST:-}" ]]; then
-            llvm_bin="$(cygpath -m "$(pwd)/clang-rust/bin")"
-            configure_args+=" --set target.${PGO_HOST}.linker=${llvm_bin}/lld-link.exe"
-            configure_args+=" --set target.${PGO_HOST}.ar=${llvm_bin}/llvm-lib.exe"
-        fi
-        ciCommandSetEnv RUST_CONFIGURE_ARGS "${configure_args}"
+        ciCommandSetEnv RUST_CONFIGURE_ARGS \
+            "${RUST_CONFIGURE_ARGS} --set llvm.clang-cl=$(pwd)/clang-rust/bin/clang-cl.exe"
 
         # Disable downloading CI LLVM on this builder;
         # setting up clang-cl just above conflicts with the default if-unchanged option.

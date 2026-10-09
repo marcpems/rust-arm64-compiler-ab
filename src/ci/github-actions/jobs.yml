@@ -780,7 +780,7 @@ auto:
         --enable-full-tools
         --enable-profiler
         --set rust.codegen-units=1
-        --set llvm.thin-lto=true
+        --set llvm.thin-lto=false
         --set llvm.link-shared=false
         --set rust.lto=thin
       PGO_HOST: x86_64-pc-windows-msvc
@@ -808,7 +808,7 @@ auto:
         --target=aarch64-pc-windows-msvc,arm64ec-pc-windows-msvc
         --enable-full-tools
         --enable-profiler
-        --set llvm.thin-lto=true
+        --set llvm.thin-lto=false
         --set llvm.link-shared=false
         --set rust.lto=thin
       PGO_HOST: aarch64-pc-windows-msvc
