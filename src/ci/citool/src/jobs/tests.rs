@@ -70,6 +70,43 @@ optional:
     check_pattern(&db, "*optional*", &["optional-job-1", "optional-dist-x86_64"]);
 }
 
+#[test]
+fn windows_msvc_distribution_optimizations() {
+    let db = load_job_db(&utils::read_to_string(Path::new(JOBS_YML_PATH)).unwrap()).unwrap();
+    for (name, host) in [
+        ("dist-x86_64-msvc", "x86_64-pc-windows-msvc"),
+        ("dist-aarch64-msvc", "aarch64-pc-windows-msvc"),
+    ] {
+        let job = db.find_auto_job_by_name(name).unwrap();
+        let args = job.env["RUST_CONFIGURE_ARGS"].as_str().unwrap();
+        let script = job.env["SCRIPT"].as_str().unwrap();
+        for option in [
+            "--set llvm.thin-lto=true",
+            "--set llvm.link-shared=false",
+            "--set rust.lto=thin",
+            "--enable-full-tools",
+            "--enable-profiler",
+        ] {
+            assert!(args.contains(option), "{name}: missing {option}");
+        }
+        assert_eq!(job.env["PGO_HOST"].as_str(), Some(host));
+        assert!(
+            script.contains(
+                "opt-dist windows-ci -- python x.py dist bootstrap --include-default-paths"
+            )
+        );
+        assert_eq!(job.env["DIST_REQUIRE_ALL_TOOLS"].as_u64(), Some(1));
+        if host.starts_with("aarch64") {
+            assert!(args.contains("--target=aarch64-pc-windows-msvc,arm64ec-pc-windows-msvc"));
+            assert!(
+                script.contains("--host aarch64-pc-windows-msvc --target aarch64-pc-windows-msvc")
+            );
+        } else {
+            assert!(args.contains("--set rust.codegen-units=1"));
+        }
+    }
+}
+
 #[track_caller]
 fn check_pattern(db: &JobDatabase, pattern: &str, expected: &[&str]) {
     let jobs = db

@@ -99,6 +99,10 @@ impl Environment {
         self.shared_llvm
     }
 
+    pub fn supports_cranelift(&self) -> bool {
+        self.host_tuple() != "aarch64-pc-windows-msvc"
+    }
+
     pub fn skipped_tests(&self) -> &[String] {
         &self.skipped_tests
     }

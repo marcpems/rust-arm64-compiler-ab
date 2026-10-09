@@ -8,6 +8,26 @@ use crate::utils::helpers::{
 };
 use crate::utils::tests::TestCtx;
 
+#[cfg(windows)]
+#[test]
+fn clang_runtime_lookup_runs_in_dry_run() {
+    use crate::core::builder::Builder;
+    use crate::core::session::Session;
+    use crate::utils::helpers::get_clang_cl_resource_dir;
+
+    let config = TestCtx::new().config("build").create_config();
+    let runtime = config.tempdir().join("clang-runtime");
+    fs::create_dir_all(&runtime).unwrap();
+    let builtins = runtime.join("clang_rt.builtins.lib");
+    File::create(&builtins).unwrap();
+    let clang_cl = config.tempdir().join("clang-cl.cmd");
+    fs::write(&clang_cl, format!("@echo off\r\necho {}\r\n", builtins.display())).unwrap();
+
+    let session = Session::new(config);
+    let builder = Builder::new(&session);
+    assert_eq!(get_clang_cl_resource_dir(&builder, clang_cl.to_str().unwrap()), runtime);
+}
+
 #[test]
 fn test_make() {
     for (host, make_path) in vec![
