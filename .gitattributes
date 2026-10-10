@@ -9,6 +9,7 @@
 *.mir linguist-language=Rust
 src/etc/installer/gfx/* binary
 src/vendor/** -text
+src/tools/opt-dist/windows-msvc-profile-runtime.patch whitespace=-blank-at-eol
 Cargo.lock linguist-generated=false
 
 # Older git versions try to fix line endings on images and fonts, this prevents it.

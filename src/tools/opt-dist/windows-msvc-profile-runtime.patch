@@ -1,0 +1,31 @@
+diff --git a/compiler-rt/lib/profile/InstrProfilingMerge.c b/compiler-rt/lib/profile/InstrProfilingMerge.c
+--- a/compiler-rt/lib/profile/InstrProfilingMerge.c
++++ b/compiler-rt/lib/profile/InstrProfilingMerge.c
+@@ -151,7 +151,8 @@
+   uintptr_t SrcBitmapStart =
+       SrcCountersEnd +
+       __llvm_profile_get_num_padding_bytes(SrcCountersEnd - SrcCountersStart);
+-  uintptr_t SrcNameStart = SrcBitmapStart + Header->NumBitmapBytes;
++  uintptr_t SrcNameStart = SrcBitmapStart + Header->NumBitmapBytes +
++                           Header->PaddingBytesAfterBitmapBytes;
+   uintptr_t SrcValueProfDataStart =
+       SrcNameStart + getDistanceFromCounterToValueProf(Header);
+   if (SrcNameStart < SrcCountersStart || SrcNameStart < SrcBitmapStart)
+diff --git a/compiler-rt/lib/profile/InstrProfilingPlatformWindows.c b/compiler-rt/lib/profile/InstrProfilingPlatformWindows.c
+--- a/compiler-rt/lib/profile/InstrProfilingPlatformWindows.c
++++ b/compiler-rt/lib/profile/InstrProfilingPlatformWindows.c
+@@ -79,7 +79,13 @@
+ const VTableProfData *__llvm_profile_begin_vtables(void) { return NULL; }
+ const VTableProfData *__llvm_profile_end_vtables(void) { return NULL; }
+ 
+-const char *__llvm_profile_begin_names(void) { return &NamesStart + 1; }
++const char *__llvm_profile_begin_names(void) {
++  const char *Begin = &NamesStart + 1;
++  /* MSVC's ARM64 linker can pad the one-byte start sentinel to four bytes. */
++  while (Begin < &NamesEnd && *Begin == '\0')
++    ++Begin;
++  return Begin;
++}
+ const char *__llvm_profile_end_names(void) { return &NamesEnd; }
+ 
+ // Type profiling isn't supported on Windows, so return NULl to make it more

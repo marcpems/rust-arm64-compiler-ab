@@ -1460,7 +1460,10 @@ fn rustc_llvm_env(builder: &Builder<'_>, cargo: &mut Cargo, target: TargetSelect
     {
         // Add clang's runtime library directory to the search path
         let clang_rt_dir = get_clang_cl_resource_dir(builder, clang_cl_path);
-        llvm_linker_flags.push_str(&format!("-L{}", clang_rt_dir.display()));
+        llvm_linker_flags.push_str(&format!(
+            r#""-L{}""#,
+            clang_rt_dir.display().to_string().replace('\\', "/")
+        ));
     }
 
     // The config can also specify its own llvm linker flags.
