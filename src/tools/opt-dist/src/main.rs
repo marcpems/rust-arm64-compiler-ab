@@ -264,13 +264,9 @@ fn execute_pipeline(
                         builder.with_cranelift().cranelift_pgo_instrument(&rustc_profile_dir_root);
                 }
 
-                if env.supports_shared_llvm() {
-                    // This first LLVM that we build will be thrown away after this stage, and it
-                    // doesn't really need LTO. Without LTO, it builds in ~1 minute thanks to sccache,
-                    // with LTO it takes almost 10 minutes. It makes the followup Rustc PGO
-                    // instrumented/optimized build a bit slower, but it seems to be worth it.
-                    builder = builder.without_llvm_lto();
-                }
+                // This LLVM is discarded before backend training. Avoid its LTO cost while
+                // preserving static linkage on hosts that cannot use shared LLVM.
+                builder = builder.without_llvm_lto(env.supports_shared_llvm());
 
                 builder.run(section)
             })?;
@@ -312,6 +308,10 @@ fn execute_pipeline(
                 }
                 if env.use_bolt() {
                     cmd = cmd.with_rustc_bolt_ldflags();
+                }
+                if !env.supports_shared_llvm() {
+                    // Reuse the same non-LTO static LLVM until backend instrumentation replaces it.
+                    cmd = cmd.without_llvm_lto(false);
                 }
 
                 cmd.run(section)

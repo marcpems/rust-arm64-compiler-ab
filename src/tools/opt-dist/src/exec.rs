@@ -169,7 +169,7 @@ impl Bootstrap {
             builder.avoid_rustc_rebuild()
         } else {
             // Training must execute the instrumented LLVM linked into rustc.
-            builder.rustc_pgo_optimize(rustc_profile).rustc_rebuild()
+            builder.without_llvm_lto(false).rustc_pgo_optimize(rustc_profile).rustc_rebuild()
         }
     }
 
@@ -183,13 +183,11 @@ impl Bootstrap {
         self
     }
 
-    pub fn without_llvm_lto(mut self) -> Self {
-        self.cmd = self
-            .cmd
-            .arg("--set")
-            .arg("llvm.thin-lto=false")
-            .arg("--set")
-            .arg("llvm.link-shared=true");
+    pub fn without_llvm_lto(mut self, shared: bool) -> Self {
+        self.cmd = self.cmd.arg("--set").arg("llvm.thin-lto=false");
+        if shared {
+            self.cmd = self.cmd.arg("--set").arg("llvm.link-shared=true");
+        }
         self
     }
 
@@ -373,9 +371,23 @@ mod unit_tests {
                     args.iter().any(|arg| arg == r#"pgo.rustc.use="profiles/rustc.profdata""#),
                     !shared
                 );
+                assert_eq!(args.iter().any(|arg| arg == "llvm.thin-lto=false"), !shared);
+                assert!(!args.iter().any(|arg| arg.starts_with("llvm.link-shared=")));
                 assert!(args.windows(2).any(|pair| pair == ["--host", host]));
                 assert!(args.windows(2).any(|pair| pair == ["--target", host]));
                 assert_eq!(env.supports_cranelift(), cranelift);
+
+                let intermediate = Bootstrap::build(&env).without_llvm_lto(shared);
+                assert!(intermediate.cmd.args.iter().any(|arg| arg == "llvm.thin-lto=false"));
+                assert_eq!(
+                    intermediate.cmd.args.iter().any(|arg| arg == "llvm.link-shared=true"),
+                    shared
+                );
+                assert!(!intermediate.cmd.args.iter().any(|arg| arg.starts_with("rust.lto=")));
+
+                let final_build =
+                    Bootstrap::dist(&env, &["python".into(), "x.py".into(), "dist".into()]);
+                assert!(!final_build.cmd.args.iter().any(|arg| arg.starts_with("llvm.thin-lto=")));
             }
         }
     }

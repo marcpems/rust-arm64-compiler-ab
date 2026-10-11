@@ -37,6 +37,16 @@ remains enabled. This preserves DLL-data import annotations for dependencies
 linking `rustc_driver` dynamically, rather than silently disabling tool LTO.
 The full-release pilot exposed this separately from compiler-only construction.
 
+Static-LLVM training also avoids ThinLTO on LLVM instances discarded before
+the final build: the initial frontend-training LLVM, its reuse during frontend
+PGO optimization, and the instrumented backend-training LLVM. Static linkage
+and the selected native tools are preserved. Rust's configured LTO mode is not
+changed. The final distribution still uses the configured LLVM ThinLTO setting.
+This extends the existing shared-LLVM preparation strategy without switching
+Windows training to shared LLVM. The original all-stages-ThinLTO pilot exceeded
+the standard hosted job budget on both Windows architectures; the revised
+training strategy still requires new end-to-end measurement and qualification.
+
 ### Required profiling-runtime preparation
 
 The Arm64 experiment found two independent compiler-rt problems: padding after
