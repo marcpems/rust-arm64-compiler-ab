@@ -191,3 +191,22 @@ qualification has completed.
 MSVC `/LTCG` is not a replacement for LLVM ThinLTO: it consumes MSVC `/GL`
 objects, not LLVM bitcode. Building LLVM with `cl.exe` and MSVC PGO/LTCG would
 change the C++ compiler and profiling system, outside this same-tools experiment.
+
+### Full-profile Arm64 MIR stack failure
+
+The matched full-release Arm64 PGO pilot exposed a default-stack overflow in
+`tests/ui/expr/if/expr-stack-overflow.rs`. A separate compiler rebuilt from the
+same source, hash-verified profiles and native tools reproduces the failure on
+both the standard Arm64 runner and the local Arm64 machine. Phase tracing gets
+through type checking; native stack unwinding identifies recursive
+`rustc_mir_build::builder::expr::into::Builder::expr_into_dest` calls, retaining
+two 1,744-byte dispatch frames per nested `else if`.
+
+Scope expressions now use a small wrapper around a non-inlined dispatch helper,
+rather than retaining that large dispatch frame themselves. Scope entry/exit,
+coverage points, block context and the default stack limit are unchanged.
+The existing 5,205-arm regression remains a required build-pass test. Native
+bootstrap type-checking and pinned formatting checks pass, but a newly built
+compiler must still prove the default-stack regression passes, followed by fresh
+full-profile release qualification. Reusing old profiles for a diagnostic
+rebuild is not an accepted release timing or a substitute for that qualification.

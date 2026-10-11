@@ -1,4 +1,5 @@
 //! regression test for <https://github.com/rust-lang/rust/issues/74564>
+//! Also exercises scope-wrapper stack usage during PGO-compiled MIR construction.
 //@ build-pass
 // ignore-tidy-file-filelength
 #![crate_type = "rlib"]

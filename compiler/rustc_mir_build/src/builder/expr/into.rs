@@ -26,6 +26,27 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
     pub(crate) fn expr_into_dest(
         &mut self,
         destination: Place<'tcx>,
+        block: BasicBlock,
+        expr_id: ExprId,
+    ) -> BlockAnd<()> {
+        let expr = &self.thir[expr_id];
+        if let ExprKind::Scope { region_scope, hir_id, value } = expr.kind {
+            let source_info = self.source_info(expr.span);
+            self.in_scope((region_scope, source_info), LintLevel::Explicit(hir_id), |this| {
+                this.push_coverage_point_for_expr(block, source_info, hir_id);
+                this.expr_into_dest(destination, block, value)
+            })
+        } else {
+            self.expr_into_dest_inner(destination, block, expr_id)
+        }
+    }
+
+    // Scope wrappers must not retain this large dispatch frame. Otherwise deep `else if`
+    // chains keep two such frames per arm, overflowing the stack in PGO builds.
+    #[inline(never)]
+    fn expr_into_dest_inner(
+        &mut self,
+        destination: Place<'tcx>,
         mut block: BasicBlock,
         expr_id: ExprId,
     ) -> BlockAnd<()> {
@@ -37,21 +58,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         let expr_span = expr.span;
         let source_info = this.source_info(expr_span);
 
-        let expr_is_block_or_scope =
-            matches!(expr.kind, ExprKind::Block { .. } | ExprKind::Scope { .. });
+        let expr_is_block = matches!(expr.kind, ExprKind::Block { .. });
 
-        if !expr_is_block_or_scope {
+        if !expr_is_block {
             this.block_context.push(BlockFrame::SubExpr);
         }
 
         let block_and = match expr.kind {
-            ExprKind::Scope { region_scope, hir_id, value } => {
-                let region_scope = (region_scope, source_info);
-                this.in_scope(region_scope, LintLevel::Explicit(hir_id), |this| {
-                    this.push_coverage_point_for_expr(block, source_info, hir_id);
-                    this.expr_into_dest(destination, block, value)
-                })
-            }
+            ExprKind::Scope { .. } => unreachable!("scope handled by expr_into_dest"),
             ExprKind::Block { block: ast_block } => {
                 this.ast_block(destination, block, ast_block, source_info)
             }
@@ -930,7 +944,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             }
         };
 
-        if !expr_is_block_or_scope {
+        if !expr_is_block {
             let popped = this.block_context.pop();
             assert!(popped.is_some());
         }
