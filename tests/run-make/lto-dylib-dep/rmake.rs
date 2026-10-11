@@ -12,4 +12,19 @@ fn main() {
     rustc().input("a_dylib.rs").crate_type("dylib").arg("-Cprefer-dynamic").run();
     rustc().input("main.rs").arg("-Clto").run();
     run("main");
+
+    // Match bootstrap's override of Cargo's bitcode-only mode for compiler-private tools.
+    // The atomic load must survive optimization to exercise a DLL data reference.
+    rustc()
+        .input("consumer.rs")
+        .crate_type("rlib")
+        .opt()
+        .arg("-Clinker-plugin-lto")
+        .arg("-Clinker-plugin-lto=no")
+        .arg("-Cembed-bitcode=yes")
+        .run();
+    for lto in ["thin", "fat"] {
+        rustc().input("indirect.rs").opt().arg(&format!("-Clto={lto}")).run();
+        run("indirect");
+    }
 }

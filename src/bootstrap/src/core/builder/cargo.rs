@@ -1237,6 +1237,18 @@ impl Builder<'_> {
                 .env("RUSTC_SNAPSHOT_LIBDIR", self.rustc_libdir(compiler));
         }
 
+        if target.is_msvc()
+            && matches!(mode, Mode::ToolRustcPrivate | Mode::Codegen)
+            && is_lto_stage(&compiler)
+            && matches!(self.config.rust_lto, RustcLto::Thin | RustcLto::Fat)
+        {
+            // Cargo's bitcode-only dependency mode assumes static linkage and drops DLL data
+            // imports. These tools link rustc_driver dynamically, so retain imports and bitcode
+            // for rustc's in-process LTO instead.
+            rustflags.arg("-Clinker-plugin-lto=no");
+            rustflags.arg("-Cembed-bitcode=yes");
+        }
+
         // Tools that use compiler libraries may inherit the `-lLLVM` link
         // requirement, but the `-L` library path is not propagated across
         // separate Cargo projects. We can add LLVM's library path to the

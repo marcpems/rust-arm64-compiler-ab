@@ -25,6 +25,17 @@ native LLVM version from `src/ci/scripts/install-clang.sh`, extracted to
 `citools\clang-rust`. Use a private Clang installation, not a shared system
 installation: preparation replaces its profiling library. Start with initialized
 submodules, without an existing `bootstrap.toml` or cached compiler/CMake builds.
+Use short physical paths for the checkout, Cargo home and temporary directory.
+The full-distribution pilot reproduced native Windows tool failures on long
+paths, including the WASI adapter archive and an AWS-LC relative header include;
+Git's `core.longpaths` setting alone does not fix native compiler/linker limits.
+
+For MSVC-target compiler-private tools and codegen backends using cross-crate
+LTO, bootstrap overrides Cargo's bitcode-only dependency mode with
+`-Clinker-plugin-lto=no -Cembed-bitcode=yes`. Rust's in-process ThinLTO/FatLTO
+remains enabled. This preserves DLL-data import annotations for dependencies
+linking `rustc_driver` dynamically, rather than silently disabling tool LTO.
+The full-release pilot exposed this separately from compiler-only construction.
 
 ### Required profiling-runtime preparation
 
