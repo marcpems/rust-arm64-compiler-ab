@@ -210,3 +210,12 @@ bootstrap type-checking and pinned formatting checks pass, but a newly built
 compiler must still prove the default-stack regression passes, followed by fresh
 full-profile release qualification. Reusing old profiles for a diagnostic
 rebuild is not an accepted release timing or a substitute for that qualification.
+
+The first scope-only repair passed with the original profiles but failed again
+after fresh training in run 38172717639. The actual retained distribution
+reproduces locally: its expression dispatcher uses a 2,880-byte frame, alongside
+a 400-byte scope wrapper. `if` lowering is now separated into another non-inlined
+helper, so nested `else if` arms do not retain the general dispatcher frame at
+all. This preserves the same CFG construction and scope/block-context handling.
+The follow-up must be checked with the newly failing profiles and then with
+fresh training; type-checking alone does not establish release qualification.

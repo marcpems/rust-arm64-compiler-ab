@@ -36,9 +36,78 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 this.push_coverage_point_for_expr(block, source_info, hir_id);
                 this.expr_into_dest(destination, block, value)
             })
+        } else if let ExprKind::If { .. } = expr.kind {
+            self.block_context.push(BlockFrame::SubExpr);
+            let result = self.if_into_dest(destination, block, expr_id);
+            self.block_context.pop();
+            result
         } else {
             self.expr_into_dest_inner(destination, block, expr_id)
         }
+    }
+
+    // Keep each nested `if` out of the large general expression dispatch frame too.
+    #[inline(never)]
+    fn if_into_dest(
+        &mut self,
+        destination: Place<'tcx>,
+        block: BasicBlock,
+        expr_id: ExprId,
+    ) -> BlockAnd<()> {
+        let this = self;
+        let expr = &this.thir[expr_id];
+        let ExprKind::If { cond, then, else_opt, if_then_scope } = expr.kind else {
+            unreachable!("expected an if expression");
+        };
+        let expr_span = expr.span;
+        let source_info = this.source_info(expr_span);
+        let then_span = this.thir[then].span;
+        let then_source_info = this.source_info(then_span);
+        let condition_scope = this.local_scope();
+
+        let true_and_false_blocks =
+            this.in_scope((if_then_scope, then_source_info), LintLevel::Inherited, |this| {
+                // FIXME: Does this need extra logic to handle let-chains?
+                let source_info = if this.is_let(cond) {
+                    let variable_scope = this.new_source_scope(then_span, LintLevel::Inherited);
+                    this.source_scope = variable_scope;
+                    SourceInfo { span: then_span, scope: variable_scope }
+                } else {
+                    this.source_info(then_span)
+                };
+
+                let (true_block, false_block) =
+                    this.in_if_then_scope(condition_scope, then_span, |this| {
+                        let true_block = this
+                            .lower_if_condition(
+                                block,
+                                cond,
+                                LowerIfCondArgs {
+                                    temp_scope_override: Some(condition_scope),
+                                    variable_source_info: source_info,
+                                    declare_let_bindings: DeclareLetBindings::Yes,
+                                },
+                            )
+                            .into_block();
+                        this.expr_into_dest(destination, true_block, then)
+                    });
+                true_block.and(false_block)
+            });
+
+        let (true_block, mut false_block);
+        false_block = unpack!(true_block = true_and_false_blocks);
+        if let Some(else_expr) = else_opt {
+            false_block = this.expr_into_dest(destination, false_block, else_expr).into_block();
+        } else {
+            let correct_si = this.source_info(expr_span.shrink_to_hi());
+            this.push_coverage_point_for_implicit_else(false_block, correct_si, expr);
+            this.cfg.push_assign_unit(false_block, correct_si, destination, this.tcx);
+        }
+
+        let join_block = this.cfg.start_new_block();
+        this.cfg.goto(true_block, source_info, join_block);
+        this.cfg.goto(false_block, source_info, join_block);
+        join_block.unit()
     }
 
     // Scope wrappers must not retain this large dispatch frame. Otherwise deep `else if`
@@ -65,78 +134,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         }
 
         let block_and = match expr.kind {
-            ExprKind::Scope { .. } => unreachable!("scope handled by expr_into_dest"),
+            ExprKind::Scope { .. } | ExprKind::If { .. } => {
+                unreachable!("scope and if handled by expr_into_dest")
+            }
             ExprKind::Block { block: ast_block } => {
                 this.ast_block(destination, block, ast_block, source_info)
             }
             ExprKind::Match { scrutinee, ref arms, .. } => {
                 this.match_expr(destination, block, scrutinee, arms, expr_span)
-            }
-            ExprKind::If { cond, then, else_opt, if_then_scope } => {
-                let then_span = this.thir[then].span;
-                let then_source_info = this.source_info(then_span);
-                let condition_scope = this.local_scope();
-
-                let true_and_false_blocks = this.in_scope(
-                    (if_then_scope, then_source_info),
-                    LintLevel::Inherited,
-                    |this| {
-                        // FIXME: Does this need extra logic to handle let-chains?
-                        let source_info = if this.is_let(cond) {
-                            let variable_scope =
-                                this.new_source_scope(then_span, LintLevel::Inherited);
-                            this.source_scope = variable_scope;
-                            SourceInfo { span: then_span, scope: variable_scope }
-                        } else {
-                            this.source_info(then_span)
-                        };
-
-                        // Lower the condition, and have it branch into *true* and *false* blocks.
-                        let (true_block, false_block) =
-                            this.in_if_then_scope(condition_scope, then_span, |this| {
-                                let true_block = this
-                                    .lower_if_condition(
-                                        block,
-                                        cond,
-                                        LowerIfCondArgs {
-                                            temp_scope_override: Some(condition_scope),
-                                            variable_source_info: source_info,
-                                            declare_let_bindings: DeclareLetBindings::Yes,
-                                        },
-                                    )
-                                    .into_block();
-
-                                // Lower the `then` arm into its block.
-                                this.expr_into_dest(destination, true_block, then)
-                            });
-
-                        // Pack `(true_block, false_block)` into `BlockAnd<BasicBlock>`.
-                        true_block.and(false_block)
-                    },
-                );
-
-                // Unpack `BlockAnd<BasicBlock>` into `(true_block, false_block)`.
-                let (true_block, mut false_block);
-                false_block = unpack!(true_block = true_and_false_blocks);
-
-                // If there is an `else` arm, lower it into `false_block`.
-                if let Some(else_expr) = else_opt {
-                    false_block =
-                        this.expr_into_dest(destination, false_block, else_expr).into_block();
-                } else {
-                    // There is no `else` arm, so we know both arms have type `()`.
-                    // Generate the implicit `else {}` by assigning unit.
-                    let correct_si = this.source_info(expr_span.shrink_to_hi());
-                    this.push_coverage_point_for_implicit_else(false_block, correct_si, expr);
-                    this.cfg.push_assign_unit(false_block, correct_si, destination, this.tcx);
-                }
-
-                // The `then` and `else` arms have been lowered into their respective
-                // blocks, so make both of them meet up in a new block.
-                let join_block = this.cfg.start_new_block();
-                this.cfg.goto(true_block, source_info, join_block);
-                this.cfg.goto(false_block, source_info, join_block);
-                join_block.unit()
             }
             ExprKind::Let { .. } => {
                 // After desugaring, `let` expressions should only appear inside `if`
