@@ -43,19 +43,7 @@ if ($Variant -eq 'nvme') {
     Set-Location -LiteralPath $workspace
 }
 $cargo = if ($Variant -eq 'nvme') { 'D:\cargo-home' } elseif ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME '.cargo' }
-New-Item -ItemType Directory -Path "$cargo\.nvme-probe" -Force | Out-Null
-'cargo cache round-trip' | Set-Content "$cargo\.nvme-probe\entry.txt"
-$tar = 'C:\Program Files\Git\usr\bin\tar.exe'
-& $tar --force-local -cf "$env:RUNNER_TEMP\cargo-smoke.tar" -C $cargo .nvme-probe
-if ($LASTEXITCODE -ne 0) { throw 'GNU tar Cargo cache save failed' }
-$restored = Join-Path $env:RUNNER_TEMP "nvme-restore-$([guid]::NewGuid())"
-New-Item -ItemType Directory -Path $restored | Out-Null
-& $tar --force-local -xf "$env:RUNNER_TEMP\cargo-smoke.tar" -C $restored
-if ($LASTEXITCODE -ne 0) { throw 'GNU tar Cargo cache restore failed' }
-if ((Get-FileHash "$cargo\.nvme-probe\entry.txt").Hash -ne
-    (Get-FileHash "$restored\.nvme-probe\entry.txt").Hash) {
-    throw 'Cargo cache round-trip content mismatch'
-}
+& "$PSScriptRoot\test-cache.ps1" -CargoHome $cargo -TemporaryRoot $env:RUNNER_TEMP
 $failureRoot = Join-Path $env:RUNNER_TEMP "nvme-failure-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Path "$failureRoot\source", "$failureRoot\existing" | Out-Null
 'preserved on failure' | Set-Content "$failureRoot\source\entry.txt"
