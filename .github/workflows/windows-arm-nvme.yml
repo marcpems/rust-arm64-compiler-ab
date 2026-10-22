@@ -12,6 +12,29 @@ permissions:
   contents: read
 
 jobs:
+  storage-safety:
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [control, nvme]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Test disk selection
+        shell: pwsh
+        run: .github\nvme\test-storage.ps1
+      - name: Exercise populated-workspace setup and failure safety
+        shell: pwsh
+        env:
+          HOST_ENVIRONMENT: ${{ runner.environment }}
+        run: .github\nvme\smoke.ps1 -Variant '${{ matrix.variant }}'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: safety-${{ matrix.variant }}
+          path: ${{ runner.temp }}\nvme-setup.json
+          if-no-files-found: error
   inventory:
     runs-on: windows-11-arm
     timeout-minutes: 10
