@@ -56,6 +56,9 @@ jobs:
               ($report.status -ne 'control' -and '${{ inputs.variant }}' -eq 'control')) {
             throw "Storage comparison is inapplicable: $($report | ConvertTo-Json -Compress -Depth 6)"
           }
+      - name: Disable automatic line-ending conversion
+        working-directory: ${{ github.workspace }}
+        run: git config --global core.autocrlf false
       - name: Checkout identical compiler source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -94,14 +97,14 @@ jobs:
           if ('${{ inputs.cache }}' -eq 'restored' -and $entries -eq 0) { throw 'Restored cache is empty' }
           @{ cacheFiles = $entries; requested = '${{ inputs.cache }}' } |
             ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE\results\cache-before.json"
-      - name: Disable automatic line-ending conversion
-        run: git config --global core.autocrlf false
       - name: Install upstream sccache
         run: src/ci/scripts/install-sccache.sh
       - name: Install upstream Clang
         run: src/ci/scripts/install-clang.sh
       - name: Install upstream WiX
         run: src/ci/scripts/install-wix.sh
+      - name: Preserve upstream submodule line endings
+        run: src/ci/scripts/disable-git-crlf-conversion.sh
       - name: Checkout upstream submodules
         run: src/ci/scripts/checkout-submodules.sh
       - name: Install upstream MinGW
@@ -149,7 +152,7 @@ jobs:
           if [[ '${{ inputs.cache }}' == cold && '${{ inputs.pair }}' == 1 ]]; then
             full="--full"
           fi
-          python ../harness/.github/nvme/measure.py --name qualification --output ../results -- \
+          python ../harness/.github/nvme/measure.py --name qualification-timing --output ../results -- \
             python ../harness/.github/nvme/qualify.py --output ../results $full
       - name: Retain build configuration and metrics
         if: always()
