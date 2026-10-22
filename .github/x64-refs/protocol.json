@@ -1,0 +1,45 @@
+{
+  "scope": "Fork-only Windows x64 Rust full PGO release-build storage experiment",
+  "source": "81b8490e74e2ae24715fd9568ac8eba6b9a3f231",
+  "runner": "windows-2025",
+  "upstream_runner_difference": "Upstream dist-x86_64-msvc uses windows-2025-8core-32gb; this experiment uses a standard hosted runner and cannot estimate that larger runner's wall time.",
+  "prior_art": {
+    "repository": "marcpems/IronRDP-ci-benchmark",
+    "branch": "perf/windows-x64-refs-replication",
+    "commit": "629219d06919270ff76b91b34095746d288b8a4f",
+    "run": 39792941867,
+    "mean_job_reduction_percent": 6.6,
+    "mean_job_difference_bootstrap_95_seconds": [-125.4, 38.1],
+    "conclusion": "Inconclusive; CPU-confounded NVMe subset. Windows 2022 ordinary ReFS, not Arm Dev Drive."
+  },
+  "treatment": {
+    "control": "Stock NTFS workspace, Cargo and temporary locations.",
+    "refs": "Shrink eligible D without deleting it; format only newly created R as ordinary ReFS. Move workspace, Cargo home and runner temp using verified copies, retained originals and junctions; put TEMP/TMP on R.",
+    "retained_ntfs": "Maximum of supported minimum, 32 GiB, and used bytes plus 16 GiB, rounded up to MiB; require at least 80 GiB reclaimed.",
+    "difference_from_prior": "NTFS reserve avoids the nearly-full D and pagefile-growth constraint of the prior minimum-size shrink.",
+    "unchanged": ["paging policy", "Defender settings", "compiler source", "PGO training", "compiler flags", "upstream extracted-artifact tests"],
+    "causal_scope": "Combined partition/filesystem/directory relocation; not ReFS alone or an NTFS-to-NVMe move."
+  },
+  "sampling": {
+    "pilot": "One cold pair followed by restored-cache jobs, gated on hosted storage safety. Excluded from confirmatory estimates.",
+    "confirmatory": "Six fixed nominal blocks, two variants in each cache mode, launched only after full pilot feasibility. No performance-dependent top-ups.",
+    "ordering": "Alternate declared variant order across blocks; GitHub controls actual scheduling and hardware assignment.",
+    "matching": ["source", "image version", "CPU model", "logical processor count", "nominal memory within 1 MiB", "disk bus", "disk capacity", "partition style", "Defender state"],
+    "primary": "NVMe-backed, hardware-matched nominal blocks only. SAS is a separate secondary stratum. Never call nominal scheduling blocks matched physical hosts.",
+    "minimum": "At least three successful matched NVMe blocks in each cache mode; otherwise the primary comparison is inconclusive.",
+    "cache": "Cold empty local sccache; restored jobs use each variant's own successful cold cache on a fresh VM. No source/build outputs restored; not upstream private S3 cache equivalence."
+  },
+  "measurement": {
+    "primary": "Job start through successful Stage 5 final distribution completion; includes storage/setup/downloads and PGO, excludes subsequent artifact tests and cache upload.",
+    "secondary": ["measured release command through distribution", "release command including upstream artifact tests", "complete experiment job", "setup", "PGO sections", "bootstrap exclusive phases", "cache restore/save", "artifact qualification"],
+    "cpu": "Whole-VM busy CPU, not raw process-tree compile CPU.",
+    "timing": "Monotonic measured command time; UTC milestone and API job/step times. Preserve all raw evidence.",
+    "limits": "360-minute job; 330-minute measured command budget leaves evidence handling time. Failure/timeout/space exhaustion is not a completed-build observation. Report distribution-complete but qualification-failed separately.",
+    "qualification": "Full opt-dist windows-ci without DIST_TRY_BUILD; all upstream tests, distribution manifest, extracted compiler execution. MSI install/upgrade not tested."
+  },
+  "decision": {
+    "report": "Per-block seconds, paired reductions, median and observed range. Fixed-seed 10000-resample block bootstrap interval is exploratory with few blocks, not proof of a universal speedup.",
+    "follow_up": "All correctness gates pass; at least three matched NVMe blocks per mode; median production reduction at least 5% in both cache modes and no matched block regression above 5%. Strong positive claim additionally requires the bootstrap interval to exclude no improvement.",
+    "incomplete": "No extrapolated full-release speedup from partial phases, timeouts, unmatched hosts, or the IronRDP workload."
+  }
+}

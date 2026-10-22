@@ -1,0 +1,97 @@
+name: Windows x64 ReFS experiment
+
+on:
+  push:
+    branches: [experiment/windows-x64-refs, experiment/windows-x64-refs-replicates]
+    paths:
+      - .github/workflows/windows-x64-refs*.yml
+      - .github/x64-refs/**
+  workflow_dispatch:
+    inputs:
+      batch:
+        description: Pilot or fixed confirmatory blocks
+        type: choice
+        options: [pilot, replicates]
+        default: pilot
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+    steps:
+      - id: matrix
+        env:
+          REPLICATES: ${{ inputs.batch == 'replicates' || github.ref_name == 'experiment/windows-x64-refs-replicates' }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          blocks = range(2, 8) if os.environ["REPLICATES"] == "true" else [1]
+          rows = [{"pair": block, "variant": variant}
+                  for block in blocks
+                  for variant in (["control", "refs"] if block % 2 else ["refs", "control"])]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("value=" + json.dumps({"include": rows}) + "\n")
+          PY
+  storage-safety:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [control, refs]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: |
+            .github/nvme
+            .github/x64-refs
+      - name: Test partition guards
+        shell: pwsh
+        run: .github\x64-refs\test-storage.ps1
+      - name: Exercise storage and preservation
+        shell: pwsh
+        env:
+          HOST_ENVIRONMENT: ${{ runner.environment }}
+        run: .github\x64-refs\smoke.ps1 -Variant '${{ matrix.variant }}'
+      - name: Verify subsequent runner commands and temporary paths
+        shell: pwsh
+        run: |
+          if ($env:X64_SAFETY_FILE_COMMAND_OK -ne 'true') { throw 'Runner file command failed' }
+          if ('${{ matrix.variant }}' -eq 'refs') {
+            if ($env:X64_REFS_FILE_COMMAND_OK -ne 'true' -or $env:TEMP -ne 'R:\build-temp' -or
+                $env:TMP -ne 'R:\build-temp' -or $env:CARGO_HOME -ne 'R:\cargo-home') {
+              throw 'Relocated environment did not reach the next step'
+            }
+          }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: x64-safety-${{ matrix.variant }}
+          path: ${{ runner.temp }}\x64-storage.json
+          if-no-files-found: error
+  cold:
+    needs: [plan, storage-safety]
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/windows-x64-refs-build.yml
+    with:
+      variant: ${{ matrix.variant }}
+      pair: ${{ matrix.pair }}
+      cache: cold
+  restored:
+    needs: [plan, cold]
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/windows-x64-refs-build.yml
+    with:
+      variant: ${{ matrix.variant }}
+      pair: ${{ matrix.pair }}
+      cache: restored
