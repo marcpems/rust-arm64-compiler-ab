@@ -46,11 +46,11 @@ $cargo = if ($Variant -eq 'nvme') { 'D:\cargo-home' } elseif ($env:CARGO_HOME) {
 New-Item -ItemType Directory -Path "$cargo\.nvme-probe" -Force | Out-Null
 'cargo cache round-trip' | Set-Content "$cargo\.nvme-probe\entry.txt"
 $tar = 'C:\Program Files\Git\usr\bin\tar.exe'
-& $tar -cf "$env:RUNNER_TEMP\cargo-smoke.tar" -C $cargo .nvme-probe
+& $tar --force-local -cf "$env:RUNNER_TEMP\cargo-smoke.tar" -C $cargo .nvme-probe
 if ($LASTEXITCODE -ne 0) { throw 'GNU tar Cargo cache save failed' }
 $restored = Join-Path $env:RUNNER_TEMP "nvme-restore-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Path $restored | Out-Null
-& $tar -xf "$env:RUNNER_TEMP\cargo-smoke.tar" -C $restored
+& $tar --force-local -xf "$env:RUNNER_TEMP\cargo-smoke.tar" -C $restored
 if ($LASTEXITCODE -ne 0) { throw 'GNU tar Cargo cache restore failed' }
 if ((Get-FileHash "$cargo\.nvme-probe\entry.txt").Hash -ne
     (Get-FileHash "$restored\.nvme-probe\entry.txt").Hash) {

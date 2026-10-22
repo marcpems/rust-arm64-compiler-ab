@@ -1,0 +1,174 @@
+name: Windows Arm NVMe full build
+
+on:
+  workflow_call:
+    inputs:
+      variant:
+        required: true
+        type: string
+      pair:
+        required: true
+        type: number
+      cache:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-11-arm
+    timeout-minutes: 360
+    env:
+      SOURCE_REVISION: 81b8490e74e2ae24715fd9568ac8eba6b9a3f231
+      HEAD_SHA: 81b8490e74e2ae24715fd9568ac8eba6b9a3f231
+      CI_JOB_NAME: dist-aarch64-msvc
+      DEPLOY: "1"
+      DIST_REQUIRE_ALL_TOOLS: "1"
+      CARGO_UNSTABLE_BUILD_DIR_NEW_LAYOUT: "true"
+      CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+      RUST_CONFIGURE_ARGS: --build=aarch64-pc-windows-msvc --host=aarch64-pc-windows-msvc --target=aarch64-pc-windows-msvc,arm64ec-pc-windows-msvc --enable-full-tools --enable-profiler
+      SCRIPT: python x.py dist bootstrap --include-default-paths
+      SCCACHE_DIR: ${{ github.workspace }}\compiler-cache
+      SCCACHE_CACHE_SIZE: 40G
+      AWS_EC2_METADATA_DISABLED: "true"
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: harness
+          sparse-checkout: .github/nvme
+      - name: Apply storage treatment before source checkout
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        env:
+          HOST_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . .\harness\.github\nvme\storage.ps1
+          $report = Invoke-NvmeSetup -Variant '${{ inputs.variant }}'
+          $report | ConvertTo-Json -Depth 8 | Set-Content "$env:RUNNER_TEMP\nvme-setup.json"
+          if (($report.status -ne 'applied' -and '${{ inputs.variant }}' -eq 'nvme') -or
+              ($report.status -ne 'control' -and '${{ inputs.variant }}' -eq 'control')) {
+            throw "Storage comparison is inapplicable: $($report | ConvertTo-Json -Compress -Depth 6)"
+          }
+      - name: Checkout identical compiler source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.SOURCE_REVISION }}
+          path: source
+          fetch-depth: 2
+      - name: Initialize result paths and source provenance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\results" | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\nvme-setup.json" "$env:GITHUB_WORKSPACE\results\storage.json"
+          $actual = git rev-parse HEAD
+          if ($actual -ne $env:SOURCE_REVISION) { throw 'Source revision mismatch' }
+          @{
+            source = $actual; experiment = '${{ github.sha }}'
+            variant = '${{ inputs.variant }}'; pair = ${{ inputs.pair }}
+            cache = '${{ inputs.cache }}'; image = $env:ImageOS; imageVersion = $env:ImageVersion
+            temporary = $env:TEMP; runnerTemporary = $env:RUNNER_TEMP
+            fullQualification = ('${{ inputs.cache }}' -eq 'cold' -and ${{ inputs.pair }} -eq 1)
+          } | ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE\results\provenance.json"
+      - name: Restore the matching compiler cache on a fresh VM
+        if: inputs.cache == 'restored'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: compiler-cache-${{ inputs.pair }}-${{ inputs.variant }}
+          path: ${{ env.SCCACHE_DIR }}
+      - name: Enforce compiler-cache condition
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $entries = if (Test-Path -LiteralPath $env:SCCACHE_DIR) {
+            @(Get-ChildItem -LiteralPath $env:SCCACHE_DIR -File -Recurse -Force).Count
+          } else { 0 }
+          if ('${{ inputs.cache }}' -eq 'cold' -and $entries -ne 0) { throw 'Cold cache is not empty' }
+          if ('${{ inputs.cache }}' -eq 'restored' -and $entries -eq 0) { throw 'Restored cache is empty' }
+          @{ cacheFiles = $entries; requested = '${{ inputs.cache }}' } |
+            ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE\results\cache-before.json"
+      - name: Disable automatic line-ending conversion
+        run: git config --global core.autocrlf false
+      - name: Install upstream sccache
+        run: src/ci/scripts/install-sccache.sh
+      - name: Install upstream Clang
+        run: src/ci/scripts/install-clang.sh
+      - name: Install upstream WiX
+        run: src/ci/scripts/install-wix.sh
+      - name: Checkout upstream submodules
+        run: src/ci/scripts/checkout-submodules.sh
+      - name: Install upstream MinGW
+        run: src/ci/scripts/install-mingw.sh
+      - name: Install upstream Ninja
+        run: src/ci/scripts/install-ninja.sh
+      - name: Verify line endings
+        run: src/ci/scripts/verify-line-endings.sh
+      - name: Record build configuration
+        shell: pwsh
+        run: |
+          @{
+            configure = $env:RUST_CONFIGURE_ARGS; script = $env:SCRIPT
+            cacheDirectory = $env:SCCACHE_DIR; cacheBucket = $env:SCCACHE_BUCKET
+            cargoHome = $env:CARGO_HOME; temp = $env:TEMP; tmp = $env:TMP
+          } | ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE\results\configuration.json"
+          if ($env:SCCACHE_BUCKET) { throw 'Unexpected remote cache configuration' }
+          git submodule status --recursive > "$env:GITHUB_WORKSPACE\results\submodules.txt"
+      - name: Full upstream Arm distribution build
+        run: |
+          python ../harness/.github/nvme/measure.py --name distribution --output ../results -- \
+            bash --noprofile --norc -eo pipefail src/ci/scripts/run-build-from-ci.sh
+      - name: Stop and record compiler cache
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          sccache --show-stats --stats-format=json > "$env:GITHUB_WORKSPACE\results\sccache.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot capture sccache statistics' }
+          sccache --stop-server
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot stop sccache before snapshot' }
+      - name: Preserve compiler cache for matched restored-cache job
+        if: success() && inputs.cache == 'cold'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: compiler-cache-${{ inputs.pair }}-${{ inputs.variant }}
+          path: ${{ env.SCCACHE_DIR }}
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+      - name: Qualify extracted distribution
+        run: |
+          full=""
+          if [[ '${{ inputs.cache }}' == cold && '${{ inputs.pair }}' == 1 ]]; then
+            full="--full"
+          fi
+          python ../harness/.github/nvme/measure.py --name qualification --output ../results -- \
+            python ../harness/.github/nvme/qualify.py --output ../results $full
+      - name: Retain build configuration and metrics
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path bootstrap.toml) {
+            Copy-Item bootstrap.toml "$env:GITHUB_WORKSPACE\results\build-bootstrap.toml"
+          }
+          if (Test-Path build\metrics.json) {
+            Copy-Item build\metrics.json "$env:GITHUB_WORKSPACE\results\last-bootstrap-metrics.json"
+          }
+          Get-Volume | Select-Object DriveLetter,FileSystem,Size,SizeRemaining |
+            ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE\results\volumes-after.json"
+      - name: Upload experiment evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: evidence-${{ inputs.cache }}-${{ inputs.pair }}-${{ inputs.variant }}
+          path: ${{ github.workspace }}\results
+          retention-days: 14
+          if-no-files-found: error

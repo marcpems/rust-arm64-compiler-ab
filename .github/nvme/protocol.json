@@ -1,0 +1,43 @@
+{
+  "purpose": "Fork-only storage experiment; not an upstream patch or shipping claim.",
+  "source": "81b8490e74e2ae24715fd9568ac8eba6b9a3f231",
+  "runner": "windows-11-arm",
+  "workload": "Unmodified upstream dist-aarch64-msvc configure arguments and full x.py dist bootstrap --include-default-paths, including Arm64EC and MSI.",
+  "treatment": "Default ReFS Dev Drive on one verified unused NVMe; relocate workspace and Cargo home; retain original directories as backups. Leave TEMP/TMP and RUNNER_TEMP, toolchains, compiler configuration and Defender settings unchanged.",
+  "control": "Default C: workspace and Cargo home; the same eligibility audit and compiler source/tool setup.",
+  "causal_scope": "Combined storage-device/filesystem/workspace-and-Cargo-home treatment, not ReFS alone.",
+  "cache_conditions": {
+    "cold": "Fresh VM and empty local sccache directory.",
+    "restored": "Another fresh VM, restoring the same variant/pair's complete compiler-cache artifact from its cold job; source/build outputs are not restored.",
+    "limitations": "These are local compiler-cache conditions, not upstream's private S3 cache or a fully warm Cargo/download cache. Record actual hit counts rather than assuming all requests hit."
+  },
+  "design": {
+    "pairs": 3,
+    "pilot_pairs": [1],
+    "replicate_pairs": [2, 3],
+    "configuration_order": ["control,nvme", "nvme,control", "control,nvme"],
+    "unit": "Independent fresh runner per variant, cache condition and pair.",
+    "failure_policy": "Keep failed/timed-out jobs and reasons. No performance claim until at least three successful matched pairs per cache condition; do not replace failures invisibly.",
+    "matching": "Require identical compiler source, image version, processor count and memory per pair. Preserve job start times and scheduling order."
+  },
+  "qualification": {
+    "all_jobs": "Disk guard tests and hosted relocation/cache/failure tests gate builds; require full artifact manifest, extracted native rustc/cargo execution and Arm64EC object compilation.",
+    "pilot_cold_pair": "Run the complete upstream opt-dist extracted-distribution test selection without additional skips on both variants. Retain NTFS temporary paths.",
+    "not_tested": ["Arm64EC runtime execution", "MSI installation/upgrade/rollback", "upstream S3 publication"],
+    "scope": "A qualified performance experiment, not complete release/shipping qualification."
+  },
+  "measurements": [
+    "Storage setup time, checkout/dependency/cache transfer steps and full distribution wall time.",
+    "Bootstrap metrics for LLVM/compiler/tools/docs/packaging where available; avoid summing overlapping nested scopes.",
+    "Whole-VM busy CPU time during distribution, explicitly not process-tree CPU.",
+    "Production-to-distribution completion: job start through successful full distribution step.",
+    "Experiment-job wall: includes cache snapshot upload, qualification, evidence uploads and post-job cleanup; report separately from production scope.",
+    "Artifact names, sizes and hashes; final free space; sccache hits/misses; failed commands."
+  ],
+  "decision_rule": {
+    "candidate_worth_followup": "All safety/correctness gates pass, median paired production-to-distribution reduction is at least 5% in both cache conditions, and no matched production pair regresses more than 5%.",
+    "inconclusive": "Insufficient matched pairs, differing images/resources, unexplained failures, or effects dominated by cache/setup differences.",
+    "statistics": "Report each pair and median percentage reduction separately by cache mode. Three pairs are preliminary evidence; observed ranges are not confidence intervals.",
+    "no_gain": "Preserve a null/negative result; do not infer Rust benefit from the earlier IronRDP measurement."
+  }
+}

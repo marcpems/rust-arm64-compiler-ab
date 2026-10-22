@@ -4,14 +4,44 @@ on:
   push:
     branches: [experiment/windows-arm-nvme]
     paths:
-      - .github/workflows/windows-arm-nvme.yml
+      - .github/workflows/windows-arm-nvme*.yml
       - .github/nvme/**
   workflow_dispatch:
+    inputs:
+      batch:
+        description: Paired blocks to execute
+        type: choice
+        options: [pilot, replicates]
+        default: pilot
 
 permissions:
   contents: read
 
 jobs:
+  cold:
+    needs: [storage-safety, inventory]
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include: ${{ fromJSON(inputs.batch == 'replicates' && '[{"pair":2,"variant":"nvme"},{"pair":2,"variant":"control"},{"pair":3,"variant":"control"},{"pair":3,"variant":"nvme"}]' || '[{"pair":1,"variant":"control"},{"pair":1,"variant":"nvme"}]') }}
+    uses: ./.github/workflows/windows-arm-nvme-build.yml
+    with:
+      variant: ${{ matrix.variant }}
+      pair: ${{ matrix.pair }}
+      cache: cold
+  restored:
+    needs: cold
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include: ${{ fromJSON(inputs.batch == 'replicates' && '[{"pair":2,"variant":"nvme"},{"pair":2,"variant":"control"},{"pair":3,"variant":"control"},{"pair":3,"variant":"nvme"}]' || '[{"pair":1,"variant":"control"},{"pair":1,"variant":"nvme"}]') }}
+    uses: ./.github/workflows/windows-arm-nvme-build.yml
+    with:
+      variant: ${{ matrix.variant }}
+      pair: ${{ matrix.pair }}
+      cache: restored
   storage-safety:
     runs-on: windows-11-arm
     timeout-minutes: 20
