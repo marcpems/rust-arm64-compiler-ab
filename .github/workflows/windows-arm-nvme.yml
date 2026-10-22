@@ -1,0 +1,44 @@
+name: Windows Arm NVMe experiment
+
+on:
+  push:
+    branches: [experiment/windows-arm-nvme]
+    paths:
+      - .github/workflows/windows-arm-nvme.yml
+      - .github/nvme/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: windows-11-arm
+    timeout-minutes: 10
+    steps:
+      - name: Capture hosted runner storage
+        shell: pwsh
+        env:
+          HOST_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $inventory = [ordered]@{
+            recordedAt = [DateTime]::UtcNow.ToString('o')
+            image = $env:ImageOS
+            imageVersion = $env:ImageVersion
+            architecture = $env:RUNNER_ARCH
+            environment = $env:HOST_ENVIRONMENT
+            workspace = $env:GITHUB_WORKSPACE
+            temporary = $env:TEMP
+            processors = [Environment]::ProcessorCount
+            memory = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+            disks = @(Get-Disk | Select-Object Number,FriendlyName,BusType,PartitionStyle,Size,NumberOfPartitions,IsBoot,IsSystem,IsOffline,IsReadOnly)
+            partitions = @(Get-Partition | Select-Object DiskNumber,PartitionNumber,DriveLetter,Size,Type)
+            volumes = @(Get-Volume | Select-Object DriveLetter,FileSystem,FileSystemLabel,Size,SizeRemaining,HealthStatus)
+          }
+          $inventory | ConvertTo-Json -Depth 6 | Tee-Object -FilePath "$env:RUNNER_TEMP\nvme-inventory.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: nvme-inventory
+          path: ${{ runner.temp }}\nvme-inventory.json
+          if-no-files-found: error
