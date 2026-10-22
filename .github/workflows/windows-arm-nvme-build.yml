@@ -126,9 +126,9 @@ jobs:
       - name: Full upstream Arm distribution build
         run: |
           python ../harness/.github/nvme/measure.py --name distribution --output ../results -- \
-            bash --noprofile --norc -eo pipefail src/ci/scripts/run-build-from-ci.sh
+            'C:\Program Files\Git\bin\bash.exe' --noprofile --norc -eo pipefail src/ci/scripts/run-build-from-ci.sh
       - name: Stop and record compiler cache
-        if: always()
+        if: success()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'

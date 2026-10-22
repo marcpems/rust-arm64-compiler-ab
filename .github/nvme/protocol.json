@@ -18,7 +18,7 @@
     "configuration_order": ["control,nvme", "nvme,control", "control,nvme"],
     "unit": "Independent fresh runner per variant, cache condition and pair.",
     "failure_policy": "Keep failed/timed-out jobs and reasons. No performance claim until at least three successful matched pairs per cache condition; do not replace failures invisibly.",
-    "matching": "Require identical compiler source, image version, processor count and memory per pair. Preserve job start times and scheduling order."
+    "matching": "Require identical compiler source, image version and processor count per pair, with visible memory within 1 MiB to tolerate firmware reservations on the same nominal memory capacity. This tolerance was set from inventory before any distribution timing result. Preserve job start times and scheduling order; retain and reject mismatched-image attempts."
   },
   "qualification": {
     "all_jobs": "Disk guard tests and hosted relocation/cache/failure tests gate builds; require full artifact manifest, extracted native rustc/cargo execution and Arm64EC object compilation.",
