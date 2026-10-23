@@ -80,6 +80,10 @@ jobs:
           if ((Get-Volume -DriveLetter $env:BUILD_SOURCE.Substring(0,1)).FileSystem -ne $expected) {
             throw 'Short source path is on the wrong filesystem'
           }
+          New-Item -ItemType Junction -Path "$env:GITHUB_WORKSPACE\src" -Target "$env:BUILD_SOURCE\src" | Out-Null
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\src\ci\github-actions\problem_matchers.json")) {
+            throw 'Upstream matcher is not visible from the runner workspace'
+          }
       - name: Initialize result paths and source provenance
         shell: pwsh
         run: |
