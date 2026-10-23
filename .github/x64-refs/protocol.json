@@ -1,6 +1,8 @@
 {
   "scope": "Fork-only Windows x64 Rust full PGO release-build storage experiment",
   "source": "81b8490e74e2ae24715fd9568ac8eba6b9a3f231",
+  "source_patch_amendment": "Both variants apply the identical one-line bootstrap-runtime-probe.patch to the pinned source. The Clang runtime-location query must execute during bootstrap dry-run validation; without the opt-in, both pilots panic before LLVM PGO. This is bootstrap command execution, not a change to PGO training or compiler flags. Record the patch SHA256 and applied diff in every observation; require identical patch hashes for matched comparisons. Upstream main still lacked this opt-in when checked before the experiment repair.",
+  "preflight": "Before opt-dist compilation or PGO training, run stage2 library/std with LLVM profile generation in bootstrap dry-run mode, using the actual CI configuration and installed Clang. Fail on any nonzero exit; retain a separate elapsed-time receipt. Preflight time remains included in measured command and production wall time. The full upstream release command follows unchanged.",
   "source_path_amendment": "Both variants use a verified copy and retained backup to equally short physical source roots: D:\\rust-src for stock NTFS, R:\\rust-src for ReFS. This avoids the fork-name MSVC path limit observed in the Arm pilot. Relocation time remains included in the primary measurement.",
   "runner": "windows-2025",
   "upstream_runner_difference": "Upstream dist-x86_64-msvc uses windows-2025-8core-32gb; this experiment uses a standard hosted runner and cannot estimate that larger runner's wall time.",
@@ -18,7 +20,7 @@
     "refs": "Shrink eligible D without deleting it; format only newly created R as ordinary ReFS. Keep the runner workspace on NTFS; move the compiler source/build root, Cargo home and runner temp using verified copies, retained originals and junctions; put TEMP/TMP and the compiler cache on R.",
     "retained_ntfs": "Maximum of supported minimum, 32 GiB, and used bytes plus 16 GiB, rounded up to MiB; require at least 80 GiB reclaimed.",
     "difference_from_prior": "NTFS reserve avoids the nearly-full D and pagefile-growth constraint of the prior minimum-size shrink. Two hosted safety attempts found a persistent lock on the runner workspace itself, so leave that directory intact and relocate the actual compiler source/build root and cache instead. Harness/evidence stay on NTFS. No performance results were available when this amendment was made.",
-    "unchanged": ["paging policy", "Defender settings", "compiler source", "PGO training", "compiler flags", "upstream extracted-artifact tests"],
+    "unchanged": ["paging policy", "Defender settings", "identically patched compiler source across variants", "PGO training", "compiler flags", "upstream extracted-artifact tests"],
     "causal_scope": "Combined partition/filesystem/directory relocation; not ReFS alone or an NTFS-to-NVMe move."
   },
   "sampling": {

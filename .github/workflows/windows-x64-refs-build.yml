@@ -31,7 +31,7 @@ jobs:
       CARGO_UNSTABLE_BUILD_DIR_NEW_LAYOUT: "true"
       CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
       RUST_CONFIGURE_ARGS: --build=x86_64-pc-windows-msvc --host=x86_64-pc-windows-msvc --target=x86_64-pc-windows-msvc --enable-full-tools --enable-profiler --set rust.codegen-units=1
-      SCRIPT: python x.py build --set rust.debug=true opt-dist && PGO_HOST=x86_64-pc-windows-msvc ./build/x86_64-pc-windows-msvc/stage1-tools-bin/opt-dist windows-ci -- python x.py dist bootstrap --include-default-paths
+      SCRIPT: python "$HARNESS_DIR/preflight.py" --output "$RESULTS_DIR" && python x.py build --set rust.debug=true opt-dist && PGO_HOST=x86_64-pc-windows-msvc ./build/x86_64-pc-windows-msvc/stage1-tools-bin/opt-dist windows-ci -- python x.py dist bootstrap --include-default-paths
       SCCACHE_DIR: ${{ inputs.variant == 'refs' && 'R:\compiler-cache' || 'D:\compiler-cache' }}
       SCCACHE_CACHE_SIZE: 40G
       AWS_EC2_METADATA_DISABLED: "true"
@@ -80,6 +80,10 @@ jobs:
           if ((Get-Volume -DriveLetter $env:BUILD_SOURCE.Substring(0,1)).FileSystem -ne $expected) {
             throw 'Short source path is on the wrong filesystem'
           }
+          New-Item -ItemType Junction -Path "$env:GITHUB_WORKSPACE\src" -Target "$env:BUILD_SOURCE\src" | Out-Null
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\src\ci\github-actions\problem_matchers.json")) {
+            throw 'Upstream matcher is not visible from the runner workspace'
+          }
       - name: Record provenance
         shell: pwsh
         run: |
@@ -97,6 +101,23 @@ jobs:
             buildSource = $env:BUILD_SOURCE
           } | ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE\results\provenance.json"
           Copy-Item "$env:HARNESS_DIR\protocol.json" "$env:RESULTS_DIR\protocol.json"
+      - name: Apply identical bootstrap runtime-probe correction
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $patch = "$env:HARNESS_DIR\bootstrap-runtime-probe.patch"
+          if (git status --porcelain --untracked-files=no) { throw 'Compiler checkout is not clean before patch' }
+          git apply --check --whitespace=error $patch
+          if ($LASTEXITCODE -ne 0) { throw 'Bootstrap patch does not apply to pinned source' }
+          git apply --whitespace=error $patch
+          if ($LASTEXITCODE -ne 0) { throw 'Bootstrap patch application failed' }
+          git diff --exit-code -- src/bootstrap/src/utils/helpers.rs > "$env:RESULTS_DIR\compiler-source.patch"
+          if ($LASTEXITCODE -ne 1) { throw 'Expected compiler-source correction is missing' }
+          $global:LASTEXITCODE = 0
+          $provenance = Get-Content "$env:RESULTS_DIR\provenance.json" -Raw | ConvertFrom-Json
+          $provenance | Add-Member -NotePropertyName source_patch_sha256 -NotePropertyValue (Get-FileHash -Algorithm SHA256 $patch).Hash
+          $provenance | ConvertTo-Json | Set-Content "$env:RESULTS_DIR\provenance.json"
+          Copy-Item $patch "$env:RESULTS_DIR\bootstrap-runtime-probe.patch"
       - name: Restore local compiler cache on fresh VM
         if: inputs.cache == 'restored'
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
