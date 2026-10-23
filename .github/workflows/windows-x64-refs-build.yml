@@ -32,7 +32,7 @@ jobs:
       CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
       RUST_CONFIGURE_ARGS: --build=x86_64-pc-windows-msvc --host=x86_64-pc-windows-msvc --target=x86_64-pc-windows-msvc --enable-full-tools --enable-profiler --set rust.codegen-units=1
       SCRIPT: python x.py build --set rust.debug=true opt-dist && PGO_HOST=x86_64-pc-windows-msvc ./build/x86_64-pc-windows-msvc/stage1-tools-bin/opt-dist windows-ci -- python x.py dist bootstrap --include-default-paths
-      SCCACHE_DIR: ${{ github.workspace }}\compiler-cache
+      SCCACHE_DIR: ${{ inputs.variant == 'refs' && 'R:\compiler-cache' || 'D:\compiler-cache' }}
       SCCACHE_CACHE_SIZE: 40G
       AWS_EC2_METADATA_DISABLED: "true"
       BUILD_SOURCE: ${{ inputs.variant == 'refs' && 'R:\rust-src' || 'D:\rust-src' }}

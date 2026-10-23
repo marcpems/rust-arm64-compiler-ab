@@ -15,9 +15,9 @@
   },
   "treatment": {
     "control": "Stock NTFS workspace, Cargo and temporary locations.",
-    "refs": "Shrink eligible D without deleting it; format only newly created R as ordinary ReFS. Move workspace, Cargo home and runner temp using verified copies, retained originals and junctions; put TEMP/TMP on R.",
+    "refs": "Shrink eligible D without deleting it; format only newly created R as ordinary ReFS. Keep the runner workspace on NTFS; move the compiler source/build root, Cargo home and runner temp using verified copies, retained originals and junctions; put TEMP/TMP and the compiler cache on R.",
     "retained_ntfs": "Maximum of supported minimum, 32 GiB, and used bytes plus 16 GiB, rounded up to MiB; require at least 80 GiB reclaimed.",
-    "difference_from_prior": "NTFS reserve avoids the nearly-full D and pagefile-growth constraint of the prior minimum-size shrink.",
+    "difference_from_prior": "NTFS reserve avoids the nearly-full D and pagefile-growth constraint of the prior minimum-size shrink. Two hosted safety attempts found a persistent lock on the runner workspace itself, so leave that directory intact and relocate the actual compiler source/build root and cache instead. Harness/evidence stay on NTFS. No performance results were available when this amendment was made.",
     "unchanged": ["paging policy", "Defender settings", "compiler source", "PGO training", "compiler flags", "upstream extracted-artifact tests"],
     "causal_scope": "Combined partition/filesystem/directory relocation; not ReFS alone or an NTFS-to-NVMe move."
   },

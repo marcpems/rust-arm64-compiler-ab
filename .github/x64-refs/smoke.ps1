@@ -11,6 +11,13 @@ New-Item -ItemType Junction "$fixture\junction" -Target $env:RUNNER_TEMP | Out-N
 $hash = (Get-FileHash "$fixture\hidden.txt").Hash
 $report = Invoke-X64Storage -Variant $Variant
 $report | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\x64-storage.json"
+if ((Get-Item -LiteralPath $workspace).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) {
+    throw 'Runner workspace must remain an ordinary NTFS directory'
+}
+if ($Variant -eq 'refs') {
+    $report.safetySource = Move-VerifiedDirectory -Source $fixture -Destination 'R:\source-fixture'
+    $report | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\x64-storage.json"
+}
 Set-Location -LiteralPath $workspace
 if ((Get-FileHash "$fixture\hidden.txt").Hash -ne $hash -or
     (Get-Content "$fixture\link") -ne 'preserve workspace' -or
@@ -19,8 +26,8 @@ if ((Get-FileHash "$fixture\hidden.txt").Hash -ne $hash -or
     -not (Get-Item "$fixture\hidden.txt" -Force).Attributes.HasFlag([IO.FileAttributes]::ReadOnly) -or
     -not (Test-Path "$fixture\empty" -PathType Container)) { throw 'Fixture preservation failed' }
 if ($Variant -eq 'refs') {
-    $backup = @($report.relocations | Where-Object destination -eq 'R:\workspace')[0].backup
-    if ((Get-FileHash "$backup\.refs-fixture\hidden.txt").Hash -ne $hash) { throw 'Backup missing' }
+    $backup = $report.safetySource.backup
+    if ((Get-FileHash "$backup\hidden.txt").Hash -ne $hash) { throw 'Backup missing' }
     $rejected = $false
     try { Invoke-X64Storage -Variant refs | Out-Null }
     catch {

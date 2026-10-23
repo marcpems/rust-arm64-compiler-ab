@@ -120,3 +120,30 @@ foreach ($failure in @('permanent', 'changed-during-lock')) {
 }
 $global:LASTEXITCODE = 0
 Write-Host 'Transient sharing violations, permanent failure and source-change preservation passed.'
+$fixture = Join-Path ([IO.Path]::GetTempPath()) "x64-locked-workspace-$([guid]::NewGuid())"
+New-Item -ItemType Directory "$fixture\workspace\source" | Out-Null
+'compiler source' | Set-Content "$fixture\workspace\source\entry.txt"
+$child = Start-Process -FilePath (Get-Process -Id $PID).Path `
+    -ArgumentList '-NoLogo', '-NoProfile', '-Command', 'Start-Sleep -Seconds 30' `
+    -WorkingDirectory "$fixture\workspace" -PassThru
+try {
+    $locked = $false
+    try { [IO.Directory]::Move("$fixture\workspace", "$fixture\renamed-workspace") }
+    catch {
+        if (($_.Exception.InnerException.HResult -band 0xffff) -ne 32) { throw }
+        $locked = $true
+    }
+    if (-not $locked) { throw 'Test did not reproduce a locked workspace' }
+    $result = Move-VerifiedDirectory -Source "$fixture\workspace\source" -Destination "$fixture\short-source"
+    if ((Get-Content "$fixture\short-source\entry.txt") -ne 'compiler source' -or
+        (Get-Content "$($result.backup)\entry.txt") -ne 'compiler source' -or
+        (Get-Item "$fixture\workspace").LinkType) {
+        throw 'Source relocation did not preserve the locked workspace'
+    }
+} finally {
+    if (-not $child.HasExited) { Stop-Process -Id $child.Id }
+    $child.WaitForExit()
+    $child.Dispose()
+    Remove-Item -LiteralPath $fixture -Recurse -Force
+}
+Write-Host 'Compiler source relocation succeeded while the runner workspace remained locked.'

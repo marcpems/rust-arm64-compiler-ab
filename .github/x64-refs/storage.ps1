@@ -83,6 +83,7 @@ function Invoke-X64Storage {
         partitionsBefore = @($partitions | Select-Object DiskNumber,PartitionNumber,DriveLetter,Size,Offset,Type)
         volumesBefore = @($volumes | Select-Object DriveLetter,FileSystem,Size,SizeRemaining)
         tempBefore = $env:TEMP; tmpBefore = $env:TMP; runnerTemp = $env:RUNNER_TEMP
+        workspacePreserved = $env:GITHUB_WORKSPACE
         status = 'preparing'
     }
     $report | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\x64-storage.json"
@@ -91,9 +92,12 @@ function Invoke-X64Storage {
         if (-not (Test-Path -LiteralPath $cargo)) { New-Item -ItemType Directory $cargo | Out-Null }
         $moves = @(
             @{ source = $env:RUNNER_TEMP; destination = 'R:\runner-temp' }
-            @{ source = $env:GITHUB_WORKSPACE; destination = 'R:\workspace' }
             @{ source = $cargo; destination = 'R:\cargo-home' }
         )
+        $workspace = Get-Item -LiteralPath $env:GITHUB_WORKSPACE -Force
+        if (-not $workspace.PSIsContainer -or ($workspace.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Expected an ordinary runner workspace'
+        }
         foreach ($move in $moves) {
             $item = Get-Item -LiteralPath $move.source -Force
             if (-not $item.PSIsContainer -or $null -eq $item.Parent -or
