@@ -1,4 +1,5 @@
 {
+  "source_path_amendment": "After the failed 269-character MSVC input path, both variants relocate the fixed checkout with a verified copy and retained backup to equally short physical roots: C:\\rust-src for control, D:\\rust-src for NVMe. All build steps run there. Relocation is included in production wall time; no compiler flags or source changed.",
   "purpose": "Fork-only storage experiment; not an upstream patch or shipping claim.",
   "source": "81b8490e74e2ae24715fd9568ac8eba6b9a3f231",
   "runner": "windows-11-arm",

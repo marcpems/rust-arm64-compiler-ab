@@ -33,10 +33,13 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}\compiler-cache
       SCCACHE_CACHE_SIZE: 40G
       AWS_EC2_METADATA_DISABLED: "true"
+      BUILD_SOURCE: ${{ inputs.variant == 'nvme' && 'D:\rust-src' || 'C:\rust-src' }}
+      HARNESS_DIR: ${{ github.workspace }}\harness\.github\nvme
+      RESULTS_DIR: ${{ github.workspace }}\results
     defaults:
       run:
         shell: bash
-        working-directory: source
+        working-directory: ${{ env.BUILD_SOURCE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -65,12 +68,25 @@ jobs:
           ref: ${{ env.SOURCE_REVISION }}
           path: source
           fetch-depth: 2
+      - name: Use a short physical source path on the selected filesystem
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . "$env:HARNESS_DIR\storage.ps1"
+          $move = Move-VerifiedDirectory -Source "$env:GITHUB_WORKSPACE\source" -Destination $env:BUILD_SOURCE
+          $move | ConvertTo-Json | Set-Content "$env:RUNNER_TEMP\source-relocation.json"
+          $expected = if ('${{ inputs.variant }}' -eq 'nvme') { 'ReFS' } else { 'NTFS' }
+          if ((Get-Volume -DriveLetter $env:BUILD_SOURCE.Substring(0,1)).FileSystem -ne $expected) {
+            throw 'Short source path is on the wrong filesystem'
+          }
       - name: Initialize result paths and source provenance
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Path "$env:GITHUB_WORKSPACE\results" | Out-Null
           Copy-Item "$env:RUNNER_TEMP\nvme-setup.json" "$env:GITHUB_WORKSPACE\results\storage.json"
+          Copy-Item "$env:RUNNER_TEMP\source-relocation.json" "$env:RESULTS_DIR\source-relocation.json"
           $actual = git rev-parse HEAD
           if ($actual -ne $env:SOURCE_REVISION) { throw 'Source revision mismatch' }
           @{
@@ -78,6 +94,7 @@ jobs:
             variant = '${{ inputs.variant }}'; pair = ${{ inputs.pair }}
             cache = '${{ inputs.cache }}'; image = $env:ImageOS; imageVersion = $env:ImageVersion
             temporary = $env:TEMP; runnerTemporary = $env:RUNNER_TEMP
+            buildSource = $env:BUILD_SOURCE
             fullQualification = ('${{ inputs.cache }}' -eq 'cold' -and ${{ inputs.pair }} -eq 1)
           } | ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE\results\provenance.json"
       - name: Restore the matching compiler cache on a fresh VM
@@ -125,7 +142,7 @@ jobs:
           git submodule status --recursive > "$env:GITHUB_WORKSPACE\results\submodules.txt"
       - name: Full upstream Arm distribution build
         run: |
-          python ../harness/.github/nvme/measure.py --name distribution --output ../results -- \
+          python "$HARNESS_DIR/measure.py" --name distribution --output "$RESULTS_DIR" -- \
             'C:\Program Files\Git\bin\bash.exe' --noprofile --norc -eo pipefail src/ci/scripts/run-build-from-ci.sh
       - name: Stop and record compiler cache
         if: success()
@@ -152,18 +169,20 @@ jobs:
           if [[ '${{ inputs.cache }}' == cold && '${{ inputs.pair }}' == 1 ]]; then
             full="--full"
           fi
-          python ../harness/.github/nvme/measure.py --name qualification-timing --output ../results -- \
-            python ../harness/.github/nvme/qualify.py --output ../results $full
+          python "$HARNESS_DIR/measure.py" --name qualification-timing --output "$RESULTS_DIR" -- \
+            python "$HARNESS_DIR/qualify.py" --output "$RESULTS_DIR" $full
       - name: Retain build configuration and metrics
         if: always()
         shell: pwsh
+        working-directory: ${{ github.workspace }}
         run: |
           $ErrorActionPreference = 'Stop'
-          if (Test-Path bootstrap.toml) {
-            Copy-Item bootstrap.toml "$env:GITHUB_WORKSPACE\results\build-bootstrap.toml"
+          New-Item -ItemType Directory $env:RESULTS_DIR -Force | Out-Null
+          if (Test-Path "$env:BUILD_SOURCE\bootstrap.toml") {
+            Copy-Item "$env:BUILD_SOURCE\bootstrap.toml" "$env:RESULTS_DIR\build-bootstrap.toml"
           }
-          if (Test-Path build\metrics.json) {
-            Copy-Item build\metrics.json "$env:GITHUB_WORKSPACE\results\last-bootstrap-metrics.json"
+          if (Test-Path "$env:BUILD_SOURCE\build\metrics.json") {
+            Copy-Item "$env:BUILD_SOURCE\build\metrics.json" "$env:RESULTS_DIR\last-bootstrap-metrics.json"
           }
           Get-Volume | Select-Object DriveLetter,FileSystem,Size,SizeRemaining |
             ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE\results\volumes-after.json"
