@@ -1,6 +1,7 @@
 {
   "scope": "Fork-only Windows x64 Rust full PGO release-build storage experiment",
   "source": "81b8490e74e2ae24715fd9568ac8eba6b9a3f231",
+  "source_path_amendment": "Both variants use a verified copy and retained backup to equally short physical source roots: D:\\rust-src for stock NTFS, R:\\rust-src for ReFS. This avoids the fork-name MSVC path limit observed in the Arm pilot. Relocation time remains included in the primary measurement.",
   "runner": "windows-2025",
   "upstream_runner_difference": "Upstream dist-x86_64-msvc uses windows-2025-8core-32gb; this experiment uses a standard hosted runner and cannot estimate that larger runner's wall time.",
   "prior_art": {
