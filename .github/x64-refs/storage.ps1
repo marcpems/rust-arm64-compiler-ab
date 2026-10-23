@@ -83,7 +83,9 @@ function Invoke-X64Storage {
         partitionsBefore = @($partitions | Select-Object DiskNumber,PartitionNumber,DriveLetter,Size,Offset,Type)
         volumesBefore = @($volumes | Select-Object DriveLetter,FileSystem,Size,SizeRemaining)
         tempBefore = $env:TEMP; tmpBefore = $env:TMP; runnerTemp = $env:RUNNER_TEMP
+        status = 'preparing'
     }
+    $report | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\x64-storage.json"
     if ($Variant -eq 'refs') {
         $cargo = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME '.cargo' }
         if (-not (Test-Path -LiteralPath $cargo)) { New-Item -ItemType Directory $cargo | Out-Null }
@@ -126,9 +128,13 @@ function Invoke-X64Storage {
         if ($volume.FileSystem -ne 'ReFS' -or $volume.DriveLetter -ne 'R') { throw 'Incorrect new volume' }
         Set-Location -LiteralPath $env:SystemRoot
         [Environment]::CurrentDirectory = $env:SystemRoot
-        $report.relocations = @($moves | ForEach-Object {
-            Move-VerifiedDirectory -Source $_.source -Destination $_.destination
-        })
+        $report.relocations = @()
+        foreach ($move in $moves) {
+            $report.pendingRelocation = $move
+            $report | ConvertTo-Json -Depth 10 | Set-Content "$env:RUNNER_TEMP\x64-storage.json"
+            $report.relocations += Move-VerifiedDirectory -Source $move.source -Destination $move.destination
+        }
+        $report.Remove('pendingRelocation')
         New-Item -ItemType Directory 'R:\build-temp' | Out-Null
         "CARGO_HOME=R:\cargo-home" >> $env:GITHUB_ENV
         "TEMP=R:\build-temp" >> $env:GITHUB_ENV

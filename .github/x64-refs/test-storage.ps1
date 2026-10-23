@@ -62,3 +62,61 @@ foreach ($case in $cases) {
     if (-not $rejected) { throw "Unsafe case accepted: $($case.name)" }
 }
 Write-Host "Passed 3 capacity/layout cases and $($cases.Count) rejection cases."
+$fixture = Join-Path ([IO.Path]::GetTempPath()) "x64-rename-test-$([guid]::NewGuid())"
+New-Item -ItemType Directory "$fixture\source" | Out-Null
+'retained data' | Set-Content "$fixture\source\entry.txt"
+$script:renameAttempts = 0
+function Move-Item {
+    param([string]$LiteralPath, [string]$Destination)
+    $script:renameAttempts++
+    if ($script:renameAttempts -le 2) {
+        throw [IO.IOException]::new('Injected sharing violation', -2147024864)
+    }
+    Microsoft.PowerShell.Management\Move-Item -LiteralPath $LiteralPath -Destination $Destination
+}
+try {
+    $result = Move-VerifiedDirectory -Source "$fixture\source" -Destination "$fixture\copied"
+    if ($script:renameAttempts -ne 3 -or
+        (Get-Content "$fixture\source\entry.txt") -ne 'retained data' -or
+        (Get-Content "$($result.backup)\entry.txt") -ne 'retained data') {
+        throw 'Transient rename handling did not preserve verified data'
+    }
+} finally {
+    Remove-Item Function:\Move-Item
+    Remove-Item -LiteralPath $fixture -Recurse -Force
+}
+foreach ($failure in @('permanent', 'changed-during-lock')) {
+    $fixture = Join-Path ([IO.Path]::GetTempPath()) "x64-rename-test-$([guid]::NewGuid())"
+    New-Item -ItemType Directory "$fixture\source" | Out-Null
+    'original' | Set-Content "$fixture\source\entry.txt"
+    $script:renameAttempts = 0
+    function Move-Item {
+        param([string]$LiteralPath, [string]$Destination)
+        $script:renameAttempts++
+        if ($failure -eq 'permanent') {
+            throw [UnauthorizedAccessException]::new('Injected access failure')
+        }
+        'updated while locked' | Set-Content "$LiteralPath\entry.txt"
+        throw [IO.IOException]::new('Injected sharing violation', -2147024864)
+    }
+    $rejected = $false
+    try {
+        Move-VerifiedDirectory -Source "$fixture\source" -Destination "$fixture\copied" | Out-Null
+    } catch {
+        $expected = if ($failure -eq 'permanent') { 'Injected access failure' } else { 'Source changed while waiting*' }
+        if ($_.Exception.Message -notlike $expected) { throw }
+        $rejected = $true
+    } finally {
+        Remove-Item Function:\Move-Item
+    }
+    try {
+        if (-not $rejected -or $script:renameAttempts -ne 1 -or
+            (Get-Item "$fixture\source").LinkType -or -not (Test-Path "$fixture\source\entry.txt")) {
+            throw "Rename failure did not preserve the original source: $failure"
+        }
+    } finally {
+        Remove-Item -LiteralPath $fixture -Recurse -Force
+    }
+}
+$global:LASTEXITCODE = 0
+Write-Host 'Transient sharing violations, permanent failure and source-change preservation passed.'

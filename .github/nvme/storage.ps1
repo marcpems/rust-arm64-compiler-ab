@@ -38,13 +38,26 @@ function Move-VerifiedDirectory {
         throw "Refusing relocation of nonordinary or root directory: $Source"
     }
     if (Test-Path -LiteralPath $Destination) { throw "Destination already exists: $Destination" }
+    Write-Host "Relocating verified directory: $Source -> $Destination"
     & robocopy $Source $Destination /E /COPY:DAT /DCOPY:DAT /SL /SJ /R:2 /W:1 /NP /NFL /NDL /NJH /NJS | Out-Host
     if ($LASTEXITCODE -ge 8) { throw "Directory copy failed: $Source (exit $LASTEXITCODE)" }
     & robocopy $Source $Destination /L /E /COPY:DAT /DCOPY:DAT /SL /SJ /R:0 /W:0 /NP /NFL /NDL /NJH /NJS | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Directory verification found differences: $Source (exit $LASTEXITCODE)" }
     $global:LASTEXITCODE = 0
     $backup = "$Source.before-nvme-$([guid]::NewGuid())"
-    Move-Item -LiteralPath $Source -Destination $backup
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
+        try {
+            Move-Item -LiteralPath $Source -Destination $backup -ErrorAction Stop
+            break
+        } catch {
+            $code = $_.Exception.HResult -band 0xffff
+            if ($code -notin @(32, 33) -or $attempt -eq 20) { throw }
+            Write-Warning "Rename is locked (Win32 $code), attempt $attempt/20: $Source"
+            Start-Sleep -Milliseconds 500
+            & robocopy $Source $Destination /L /E /COPY:DAT /DCOPY:DAT /SL /SJ /R:0 /W:0 /NP /NFL /NDL /NJH /NJS | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Source changed while waiting to rename: $Source (exit $LASTEXITCODE)" }
+        }
+    }
     New-Item -ItemType Junction -Path $Source -Target $Destination | Out-Null
     return @{ source = $Source; destination = $Destination; backup = $backup }
 }
