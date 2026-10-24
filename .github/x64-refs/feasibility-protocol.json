@@ -1,0 +1,29 @@
+{
+  "scope": "Fork-only feasibility of the complete Rust x64 release on a standard GitHub-hosted Windows runner, not a storage comparison",
+  "source": "4da678aada4683607acbd67a8da37a320c791f93",
+  "pgo_pr": "https://github.com/rust-lang/rust/pull/164707",
+  "source_amendment": "Pin the current PR head, including review feedback, rather than the older fork merge. Apply only the previously recorded bootstrap-runtime-probe.patch so the configured Clang probe executes in bootstrap dry-run mode. Record both the patch digest and applied diff. Do not change the PR's PGO implementation, training scenarios, parallelism, optimization flags, tools or artifact tests.",
+  "runner": "windows-2025, public GitHub-hosted, exactly four logical processors; record actual CPU, RAM, image and storage without choosing a CPU vendor or disk bus",
+  "storage": "Stock NTFS. Use D:\\rust-src and D:\\compiler-cache. No partitioning, ReFS, Defender, paging or temporary-directory changes.",
+  "attempts": [
+    {
+      "cache": "cold",
+      "condition": "Empty local compiler cache and fresh source/build/profile directories",
+      "whole_attempt_budget_minutes": 350,
+      "follow_up": "After success or failure, stop sccache and preserve its available entries. A partial cache is allowed and is not described as fully warm."
+    },
+    {
+      "cache": "restored",
+      "condition": "Fresh VM and source checkout. Restore only this run's cold-attempt compiler-cache artifact; no build outputs, PGO profiles, source workspace or upstream S3 cache.",
+      "whole_attempt_budget_minutes": 355,
+      "follow_up": "Run only when the cold attempt saved a compiler-cache artifact, even if that attempt timed out. Repeat the entire PGO training, full distribution and upstream artifact tests."
+    }
+  ],
+  "measurement": "The 360-minute GitHub job ceiling remains unchanged. Record time from the first step and subtract all setup/cache restoration from the release budget. Reserve ten minutes after the cold attempt for cache/evidence transfer and five after the restored attempt. Record the full release command, successful phase milestones, qualification, cache statistics and API job/step times separately. A timeout at the shorter evidence-preserving deadline does not prove that completion within 360 minutes is impossible.",
+  "qualification": "Require zero release exit status, no timeout, successful Stage 1, Stage 2, Stage 5 and Run tests sections, complete distribution manifest, nonempty PGO profiles and native execution using the extracted compiler. Independently confirm actual whole-job duration below 360 minutes from GitHub's job metadata. MSI installation is not tested.",
+  "decision": "A qualified completed cold attempt demonstrates cold feasibility for that observed runner. A qualified completed restored attempt demonstrates only compiler-cache-dependent feasibility. One success is an existence proof, not a reliable cross-hardware completion guarantee or a median. Failure or timeout of both attempts leaves standard-runner feasibility unconfirmed; do not extrapolate completion times or silently split work across jobs.",
+  "prior_evidence": [
+    "https://github.com/marcpems/IronRDP-ci-benchmark/actions/runs/39110448524",
+    "https://github.com/marcpems/rust-arm64-compiler-ab/actions/runs/40036080644"
+  ]
+}

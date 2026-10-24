@@ -1,0 +1,38 @@
+name: Standard Windows x64 full release feasibility
+
+on:
+  push:
+    branches: [experiment/windows-x64-feasibility]
+    paths:
+      - .github/workflows/windows-x64-release-feasibility.yml
+      - .github/workflows/windows-x64-refs-build.yml
+      - .github/x64-refs/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standard-x64-release-feasibility
+  cancel-in-progress: false
+
+jobs:
+  cold:
+    if: github.repository == 'marcpems/rust-arm64-compiler-ab' && github.event.repository.visibility == 'public'
+    uses: ./.github/workflows/windows-x64-refs-build.yml
+    with:
+      variant: control
+      pair: 1
+      cache: cold
+      feasibility: true
+      source_revision: 4da678aada4683607acbd67a8da37a320c791f93
+  restored:
+    needs: cold
+    if: always() && !cancelled() && needs.cold.outputs.cache_available == 'true'
+    uses: ./.github/workflows/windows-x64-refs-build.yml
+    with:
+      variant: control
+      pair: 1
+      cache: restored
+      feasibility: true
+      source_revision: 4da678aada4683607acbd67a8da37a320c791f93
