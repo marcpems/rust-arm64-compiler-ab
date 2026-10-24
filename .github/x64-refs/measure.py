@@ -7,9 +7,10 @@ from pathlib import Path
 import queue
 import re
 import shutil
-import subprocess
 import threading
 import time
+
+from process_job import ProcessJob
 
 
 SECTION = re.compile(r"Section `([^`]+)` ended: (OK|FAIL) \(([\d.]+)s\)")
@@ -25,16 +26,18 @@ def cpu_seconds():
 
 
 def measure(command, output, timeout):
+    with ProcessJob() as job:
+        return measure_job(command, output, timeout, job)
+
+
+def measure_job(command, output, timeout, job):
     output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     start_cpu = cpu_seconds()
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
     events = []
     lines = queue.Queue()
-    process = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        encoding="utf-8", errors="replace", bufsize=1,
-    )
+    process = job.start(command)
 
     def reader():
         for line in process.stdout:
@@ -51,11 +54,9 @@ def measure(command, output, timeout):
         finished_output = False
         while not finished_output:
             elapsed = time.perf_counter() - started
-            if elapsed >= timeout and process.poll() is None and not timed_out:
+            if elapsed >= timeout and not timed_out:
                 timed_out = True
-                subprocess.run(
-                    ["taskkill", "/PID", str(process.pid), "/T", "/F"], check=True,
-                )
+                job.terminate()
             if elapsed >= next_sample:
                 resources.write(json.dumps({
                     "elapsed_seconds": elapsed, "utc": dt.datetime.now(dt.timezone.utc).isoformat(),

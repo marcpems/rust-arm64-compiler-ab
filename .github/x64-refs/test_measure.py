@@ -1,3 +1,5 @@
+import ctypes
+from ctypes import wintypes
 import json
 import os
 from pathlib import Path
@@ -8,15 +10,15 @@ import unittest
 
 
 class MeasurementTests(unittest.TestCase):
-    def invoke(self, code, timeout=30, env=None):
+    def invoke(self, code, timeout=30, env=None, command=None):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         output = Path(directory.name)
         result = subprocess.run([
             sys.executable, str(Path(__file__).with_name("measure.py")),
             "--output", str(output), "--timeout", str(timeout), "--",
-            sys.executable, "-c", code,
-        ], capture_output=True, text=True, env=env)
+            *(command if command is not None else [sys.executable, "-c", code]),
+        ], capture_output=True, text=True, env=env, timeout=20)
         return result, output
 
     def test_sections_and_failure_propagation(self):
@@ -36,6 +38,50 @@ class MeasurementTests(unittest.TestCase):
         receipt = json.loads((output / "release.json").read_text())
         self.assertTrue(receipt["timed_out"])
         self.assertFalse(receipt["sections"])
+
+    def test_timeout_with_exited_parent_and_live_descendant(self):
+        code = (
+            "import subprocess,sys; "
+            "subprocess.Popen([sys.executable,'-c','import time; time.sleep(5)'])"
+        )
+        result, output = self.invoke(code, timeout=1)
+        self.assertEqual(result.returncode, 124, result.stderr)
+        receipt = json.loads((output / "release.json").read_text())
+        self.assertTrue(receipt["timed_out"])
+        self.assertLess(receipt["wall_seconds"], 4)
+
+    def test_timeout_terminates_git_bash_pipeline(self):
+        result, output = self.invoke("", timeout=1, command=[
+            r"C:\Program Files\Git\bin\bash.exe", "--noprofile", "--norc",
+            "-c", "sleep 5 | cat",
+        ])
+        self.assertEqual(result.returncode, 124, result.stderr)
+        receipt = json.loads((output / "release.json").read_text())
+        self.assertTrue(receipt["timed_out"])
+        self.assertLess(receipt["wall_seconds"], 4)
+
+    def test_success_preserves_detached_service_for_cache_statistics(self):
+        result, output = self.invoke(
+            "import subprocess,sys; "
+            "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(10)'], "
+            "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+            "print(p.pid)"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pid = int((output / "release.log").read_text().strip())
+        api = ctypes.WinDLL("kernel32", use_last_error=True)
+        api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        api.OpenProcess.restype = wintypes.HANDLE
+        api.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        api.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        api.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = api.OpenProcess(0x100001, False, pid)
+        self.assertTrue(handle, "Detached service was terminated on normal measurement completion")
+        try:
+            self.assertEqual(api.WaitForSingleObject(handle, 0), 258)
+        finally:
+            api.TerminateProcess(handle, 0)
+            api.CloseHandle(handle)
 
     def test_preserves_upstream_step_summary(self):
         with tempfile.TemporaryDirectory() as directory:
