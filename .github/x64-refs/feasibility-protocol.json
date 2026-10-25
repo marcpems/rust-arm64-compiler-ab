@@ -5,6 +5,7 @@
   "source_amendment": "Pin the current PR head, including review feedback, rather than the older fork merge. Apply only the previously recorded bootstrap-runtime-probe.patch so the configured Clang probe executes in bootstrap dry-run mode. Record both the patch digest and applied diff. Do not change the PR's PGO implementation, training scenarios, parallelism, optimization flags, tools or artifact tests.",
   "runner": "windows-2025, public GitHub-hosted, exactly four logical processors; record actual CPU, RAM, image and storage without choosing a CPU vendor or disk bus",
   "storage": "Stock NTFS. Use D:\\rust-src and D:\\compiler-cache. No partitioning, ReFS, Defender, paging or temporary-directory changes.",
+  "cache_handoff_amendment": "Run40140100420 completed both PGO stages but timed out during final LLVM compilation. Job Object termination worked; the subsequent unconditional sccache --stop-server failed because the server was already dead, incorrectly preventing cache upload and the restored attempt. For a recorded timeout with exit124, the command and its server are already terminated, so preserve the on-disk cache without stopping it again. Normal completion still requires a successful server stop. Validate this path with a real hosted sccache timeout, artifact upload from a failed job and download on a fresh VM before repeating the full attempt. The original cache was not uploaded and cannot be recovered.",
   "attempts": [
     {
       "cache": "cold",

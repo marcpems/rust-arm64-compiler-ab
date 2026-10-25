@@ -276,7 +276,8 @@ jobs:
       - name: Stop cache before snapshot
         id: cache-stop
         if: always() && (success() || (inputs.feasibility && steps.release.outcome != 'skipped'))
-        run: sccache --stop-server
+        shell: pwsh
+        run: '& "$env:HARNESS_DIR\stop-cache.ps1" -OutputDirectory "$env:RESULTS_DIR"'
       - name: Save cache for matching restored run
         id: cache-snapshot
         if: always() && inputs.cache == 'cold' && steps.cache-stop.outcome == 'success' && (success() || inputs.feasibility)

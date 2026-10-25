@@ -1,0 +1,70 @@
+name: Windows x64 timeout cache handoff regression
+
+on:
+  push:
+    branches: [experiment/x64-cache-handoff]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  timed-out:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    outputs:
+      cache_available: ${{ steps.snapshot.outputs.artifact-id != '' }}
+    env:
+      SCCACHE_DIR: ${{ github.workspace }}\handoff-cache
+      SCCACHE_SERVER_PORT: "43229"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: .github/x64-refs
+      - name: Exercise measurement and cache shutdown regression tests
+        run: python -m unittest discover -s .github/x64-refs -p test_measure.py
+      - name: Exercise timeout with the real upstream cache server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          curl.exe --fail --location --retry 3 https://ci-mirrors.rust-lang.org/rustc/2025-02-24-sccache-v0.10.0-x86_64-pc-windows-msvc.exe -o sccache.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download upstream sccache' }
+          $env:PATH = "$env:GITHUB_WORKSPACE;$env:PATH"
+          python .github\x64-refs\measure.py --output results --timeout 8 -- python -c "import os,pathlib,subprocess,time; subprocess.run([str(pathlib.Path('sccache.exe').resolve()),'--start-server'],check=True); p=pathlib.Path(os.environ['SCCACHE_DIR']); p.mkdir(parents=True,exist_ok=True); (p/'handoff-fixture.txt').write_text('timeout-cache-handoff'); time.sleep(60)"
+          if ($LASTEXITCODE -ne 124) { throw 'Expected an actual measured timeout' }
+          $global:LASTEXITCODE = 0
+          & .\sccache.exe --stop-server
+          if ($LASTEXITCODE -ne 2) { throw 'Expected the timeout to have terminated the cache server' }
+          $global:LASTEXITCODE = 0
+          & .github\x64-refs\stop-cache.ps1 -OutputDirectory results
+          if ((Get-Content "$env:SCCACHE_DIR\handoff-fixture.txt" -Raw) -ne 'timeout-cache-handoff') {
+            throw 'Timeout lost the cache fixture'
+          }
+      - name: Upload cache after timeout
+        id: snapshot
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: timeout-cache-handoff
+          path: ${{ env.SCCACHE_DIR }}
+          if-no-files-found: error
+          retention-days: 1
+      - name: Keep the seed job failed just like a censored release
+        shell: pwsh
+        run: throw 'Intentional failed seed job; the fresh-VM restored job must still run'
+  restored:
+    needs: timed-out
+    if: always() && !cancelled() && needs.timed-out.outputs.cache_available == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: timeout-cache-handoff
+          path: restored-cache
+      - name: Verify handoff from the failed job on a fresh runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((Get-Content restored-cache\handoff-fixture.txt -Raw) -ne 'timeout-cache-handoff') {
+            throw 'Cache handoff failed'
+          }

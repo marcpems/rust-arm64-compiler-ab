@@ -91,6 +91,30 @@ class MeasurementTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((output / "upstream-step-summary.txt").read_text(), summary.read_text())
 
+    def stop_cache(self, output, cache_function):
+        script = Path(__file__).with_name("stop-cache.ps1")
+        return subprocess.run([
+            "pwsh", "-NoProfile", "-Command",
+            cache_function + "; & '" + str(script) + "' -OutputDirectory '" + str(output) + "'",
+        ], capture_output=True, text=True, timeout=20)
+
+    def test_timeout_cache_snapshot_does_not_stop_dead_server(self):
+        result, output = self.invoke("import time; time.sleep(30)", timeout=1)
+        self.assertEqual(result.returncode, 124, result.stderr)
+        stopped = self.stop_cache(output, "function sccache { throw 'Server is already dead' }")
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertIn("already terminated", stopped.stdout)
+
+    def test_success_cache_snapshot_requires_successful_server_stop(self):
+        result, output = self.invoke("print('complete')")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stopped = self.stop_cache(output, "function sccache { $global:LASTEXITCODE = 2 }")
+        self.assertNotEqual(stopped.returncode, 0)
+        self.assertIn("Cannot stop sccache", stopped.stderr)
+        stopped = self.stop_cache(output, "function sccache { $global:LASTEXITCODE = 0; 'cache stopped' }")
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertIn("cache stopped", stopped.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
