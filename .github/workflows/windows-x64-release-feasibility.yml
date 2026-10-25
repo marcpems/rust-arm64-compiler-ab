@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: standard-x64-release-feasibility

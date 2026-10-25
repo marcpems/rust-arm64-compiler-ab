@@ -18,7 +18,7 @@ class MeasurementTests(unittest.TestCase):
             sys.executable, str(Path(__file__).with_name("measure.py")),
             "--output", str(output), "--timeout", str(timeout), "--",
             *(command if command is not None else [sys.executable, "-c", code]),
-        ], capture_output=True, text=True, env=env, timeout=20)
+        ], capture_output=True, text=True, encoding="utf-8", env=env, timeout=20)
         return result, output
 
     def test_sections_and_failure_propagation(self):
@@ -38,6 +38,18 @@ class MeasurementTests(unittest.TestCase):
         receipt = json.loads((output / "release.json").read_text())
         self.assertTrue(receipt["timed_out"])
         self.assertFalse(receipt["sections"])
+
+    def test_unicode_output_with_legacy_windows_console_encoding(self):
+        text = "\u4e2d\u6587 \U0001f680"
+        result, output = self.invoke(
+            "import sys; sys.stdout.buffer.write(bytes.fromhex('"
+            + (text + "\n").encode("utf-8").hex() + "')); sys.stdout.flush()",
+            env=dict(os.environ, PYTHONIOENCODING="cp1252"),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(text, result.stdout)
+        self.assertIn(text, (output / "release.log").read_text(encoding="utf-8"))
+        self.assertEqual(json.loads((output / "release.json").read_text())["exit_code"], 0)
 
     def test_timeout_with_exited_parent_and_live_descendant(self):
         code = (

@@ -18,12 +18,16 @@ on:
       feasibility:
         type: boolean
         default: false
+      cache_run_id:
+        type: string
+        default: ''
     outputs:
       cache_available:
         value: ${{ jobs.build.outputs.cache_available }}
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build:
@@ -176,6 +180,7 @@ jobs:
           $provenance | Add-Member -NotePropertyName purpose -NotePropertyValue 'standard-runner-release-feasibility'
           $provenance | Add-Member -NotePropertyName attempt_started_at -NotePropertyValue $env:FEASIBILITY_STARTED
           $provenance | Add-Member -NotePropertyName pgo_pr -NotePropertyValue 'https://github.com/rust-lang/rust/pull/164707'
+          $provenance | Add-Member -NotePropertyName cache_source_run -NotePropertyValue '${{ inputs.cache_run_id || github.run_id }}'
           $provenance | ConvertTo-Json | Set-Content "$env:RESULTS_DIR\provenance.json"
       - name: Restore local compiler cache on fresh VM
         if: inputs.cache == 'restored'
@@ -183,6 +188,8 @@ jobs:
         with:
           name: x64-compiler-cache-${{ inputs.pair }}-${{ inputs.variant }}
           path: ${{ env.SCCACHE_DIR }}
+          run-id: ${{ inputs.cache_run_id || github.run_id }}
+          github-token: ${{ inputs.cache_run_id != '' && github.token || '' }}
       - name: Enforce cache condition
         shell: pwsh
         run: |

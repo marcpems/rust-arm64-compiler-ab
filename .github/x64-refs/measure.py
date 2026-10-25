@@ -7,6 +7,7 @@ from pathlib import Path
 import queue
 import re
 import shutil
+import sys
 import threading
 import time
 
@@ -105,6 +106,8 @@ def measure_job(command, output, timeout, job):
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--timeout", type=int, default=19800)

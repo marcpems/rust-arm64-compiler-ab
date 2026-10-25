@@ -1,0 +1,30 @@
+name: Standard Windows x64 full restored-cache release replay
+
+on:
+  push:
+    branches: [experiment/windows-x64-restored-replay]
+    paths:
+      - .github/workflows/windows-x64-restored-replay.yml
+      - .github/workflows/windows-x64-refs-build.yml
+      - .github/x64-refs/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: standard-x64-restored-release-replay
+  cancel-in-progress: false
+
+jobs:
+  restored:
+    if: github.repository == 'marcpems/rust-arm64-compiler-ab' && github.event.repository.visibility == 'public'
+    uses: ./.github/workflows/windows-x64-refs-build.yml
+    with:
+      variant: control
+      pair: 1
+      cache: restored
+      feasibility: true
+      cache_run_id: '40168676329'
+      source_revision: 4da678aada4683607acbd67a8da37a320c791f93
