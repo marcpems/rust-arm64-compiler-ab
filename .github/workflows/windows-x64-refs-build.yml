@@ -370,6 +370,20 @@ jobs:
               Copy-Item "$env:BUILD_SOURCE\$entry" "results\last-$([IO.Path]::GetFileName($entry))"
             }
           }
+          if ('${{ inputs.progressive_cache }}' -eq 'true') {
+            $profiles = @()
+            if (Test-Path "$env:BUILD_SOURCE\opt-artifacts") {
+              $profiles = @(Get-ChildItem "$env:BUILD_SOURCE\opt-artifacts" -Filter *.profdata -File -Recurse |
+                ForEach-Object {
+                  @{
+                    path = $_.FullName.Substring($env:BUILD_SOURCE.Length + 1)
+                    bytes = $_.Length
+                    sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+                  }
+                })
+            }
+            ConvertTo-Json -InputObject $profiles -Depth 4 | Set-Content results\pgo-profile-fingerprints.json
+          }
           Get-Volume | Select-Object DriveLetter,FileSystem,Size,SizeRemaining |
             ConvertTo-Json | Set-Content results\volumes-after.json
           Get-CimInstance Win32_PageFileUsage | Select-Object Name,AllocatedBaseSize,CurrentUsage,PeakUsage |
