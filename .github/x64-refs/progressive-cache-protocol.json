@@ -1,0 +1,18 @@
+{
+  "purpose": "Find an attainable compiler-cache state that permits a fully qualified standard-x64 release, then measure backwards from a frozen successful cache.",
+  "source": "4da678aada4683607acbd67a8da37a320c791f93",
+  "equivalent_pr_head": "9184323ab1bc8191ef37a6cada421026b0d9f7c0",
+  "initial_cache_run": 40168676329,
+  "initial_cache_artifact": 12598711742,
+  "warming": "Each fresh-VM attempt repeats full PGO training, distribution and tests. Save its resulting compiler cache even after a measured timeout, then use that new cache in the next attempt. Never transfer build trees or profiles. Keep every generation and its lineage.",
+  "telemetry": "Start sccache inside the measurement Job Object and collect cumulative counters initially, every300s and immediately before timeout or after command completion. Stats requests also belong to the Job Object. Explicitly retain sampling errors; never interpret a restarted empty server as build statistics.",
+  "cache_inventory": "Record sorted relative entry paths and sizes before and after, including additions, removals and resized entries. The manifest digest identifies this path/size inventory, not file contents; artifact digest verification protects transfer integrity.",
+  "warming_budget_minutes": 355,
+  "confirmation_budget_minutes": 359,
+  "job_limit_minutes": 360,
+  "success": "Require exit0, complete PGO/final-build/upstream-test sections, artifact manifest and extracted compiler qualification, and an actual successful whole job within360min. A completed distribution alone is insufficient.",
+  "fully_warmed_caveat": "A larger cache is not proof of effective warmth. Inspect cacheable hit/miss counters and per-run cache growth. Fresh PGO profiles may invalidate final-build cache keys; investigate persistent misses rather than claim that progressive warming must converge.",
+  "confirmation": "After the first fully qualified success, freeze the successful cache generation and test it again on a fresh standard runner. Record processor/image/storage; do not mix hardware strata into a single threshold.",
+  "backwards_measurement": "Only after a successful frozen-cache baseline, retain deterministic nested subsets of that same cache and measure full releases. Bracket success/failure around360min, reporting both actual retained entries/bytes and effective hit rates. Runtime need not be monotone under allocation variance or regenerated profiles.",
+  "limits_of_inference": "A success is conditional on source, cache and hardware. Failure of a finite warming sequence does not prove that no possible cache state can succeed. Evidence-preserving355min seed cutoffs are not360min impossibility proofs."
+}

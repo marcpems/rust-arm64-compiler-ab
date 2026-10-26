@@ -6,7 +6,11 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest.mock import Mock
+
+from measure import capture_cache_stats
 
 
 class MeasurementTests(unittest.TestCase):
@@ -126,6 +130,43 @@ class MeasurementTests(unittest.TestCase):
         stopped = self.stop_cache(output, "function sccache { $global:LASTEXITCODE = 0; 'cache stopped' }")
         self.assertEqual(stopped.returncode, 0, stopped.stderr)
         self.assertIn("cache stopped", stopped.stdout)
+
+    def test_cache_statistics_preserve_pre_timeout_counters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            process = Mock(returncode=0)
+            process.communicate.return_value = ('{"stats":{"compile_requests":12}}', None)
+            job = Mock()
+            job.start.return_value = process
+            capture_cache_stats(job, "sccache", output, time.perf_counter(), "before-timeout")
+            record = json.loads((output / "cache-stats.jsonl").read_text())
+            self.assertEqual(record["data"]["stats"]["compile_requests"], 12)
+            self.assertEqual(record["reason"], "before-timeout")
+            job.start.assert_called_once_with(["sccache", "--show-stats", "--stats-format=json"])
+
+    def test_cache_statistics_errors_are_recorded_not_zeroed(self):
+        for result, code in [("not JSON", 0), ("server unavailable", 2)]:
+            with self.subTest(result=result), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)
+                process = Mock(returncode=code)
+                process.communicate.return_value = (result, None)
+                job = Mock()
+                job.start.return_value = process
+                record = capture_cache_stats(job, "sccache", output, time.perf_counter(), "periodic")
+                self.assertIn("error", record)
+                self.assertNotIn("data", record)
+
+    def test_cache_statistics_timeout_is_bounded_and_recorded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            process = Mock()
+            process.communicate.side_effect = [subprocess.TimeoutExpired("sccache", 5), ("", None)]
+            job = Mock()
+            job.start.return_value = process
+            record = capture_cache_stats(job, "sccache", output, time.perf_counter(), "before-timeout")
+            process.kill.assert_called_once()
+            self.assertIn("error", record)
+            self.assertNotIn("data", record)
 
 
 if __name__ == "__main__":

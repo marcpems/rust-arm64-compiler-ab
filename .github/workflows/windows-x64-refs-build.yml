@@ -21,6 +21,15 @@ on:
       cache_run_id:
         type: string
         default: ''
+      progressive_cache:
+        type: boolean
+        default: false
+      save_restored_cache:
+        type: boolean
+        default: false
+      release_budget_minutes:
+        type: number
+        default: 0
     outputs:
       cache_available:
         value: ${{ jobs.build.outputs.cache_available }}
@@ -76,6 +85,10 @@ jobs:
           }
           $volume = Get-Volume -DriveLetter D
           if ($volume.FileSystem -ne 'NTFS') { throw 'Expected stock NTFS on D' }
+          $budget = ${{ inputs.release_budget_minutes }}
+          if ($budget -ne 0 -and ($budget -lt 1 -or $budget -gt 359 -or $budget -ne [Math]::Floor($budget))) {
+            throw 'Explicit release budget must be an integer between1 and359 minutes'
+          }
           @{
             variant = 'control'; status = 'read-only-audit'; runner = 'windows-2025'
             cpu = @(Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors)
@@ -176,11 +189,15 @@ jobs:
           $protocol = Get-Content "$env:HARNESS_DIR\feasibility-protocol.json" -Raw | ConvertFrom-Json
           if ($protocol.source -ne $env:SOURCE_REVISION) { throw 'Feasibility source does not match its protocol' }
           Copy-Item "$env:HARNESS_DIR\feasibility-protocol.json" "$env:RESULTS_DIR\protocol.json" -Force
+          if ('${{ inputs.progressive_cache }}' -eq 'true') {
+            Copy-Item "$env:HARNESS_DIR\progressive-cache-protocol.json" "$env:RESULTS_DIR\progressive-cache-protocol.json"
+          }
           $provenance = Get-Content "$env:RESULTS_DIR\provenance.json" -Raw | ConvertFrom-Json
           $provenance | Add-Member -NotePropertyName purpose -NotePropertyValue 'standard-runner-release-feasibility'
           $provenance | Add-Member -NotePropertyName attempt_started_at -NotePropertyValue $env:FEASIBILITY_STARTED
           $provenance | Add-Member -NotePropertyName pgo_pr -NotePropertyValue 'https://github.com/rust-lang/rust/pull/164707'
           $provenance | Add-Member -NotePropertyName cache_source_run -NotePropertyValue '${{ inputs.cache_run_id || github.run_id }}'
+          $provenance | Add-Member -NotePropertyName progressive_cache -NotePropertyValue ([bool]::Parse('${{ inputs.progressive_cache }}'))
           $provenance | ConvertTo-Json | Set-Content "$env:RESULTS_DIR\provenance.json"
       - name: Restore local compiler cache on fresh VM
         if: inputs.cache == 'restored'
@@ -201,6 +218,10 @@ jobs:
           if ('${{ inputs.cache }}' -eq 'restored' -and $entries -eq 0) { throw 'Empty restored cache' }
           @{ requested = '${{ inputs.cache }}'; files = $entries } |
             ConvertTo-Json | Set-Content "$env:GITHUB_WORKSPACE\results\cache-before.json"
+          if ('${{ inputs.progressive_cache }}' -eq 'true') {
+            python "$env:HARNESS_DIR\cache_inventory.py" --cache "$env:SCCACHE_DIR" --output "$env:RESULTS_DIR\cache-before-inventory.json"
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot inventory the restored compiler cache' }
+          }
       - name: Install upstream sccache
         run: src/ci/scripts/install-sccache.sh
       - name: Install upstream Clang
@@ -243,6 +264,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $started = [DateTimeOffset]::Parse($env:FEASIBILITY_STARTED)
           $budget = if ('${{ inputs.cache }}' -eq 'cold') { 350 * 60 } else { 355 * 60 }
+          if (${{ inputs.release_budget_minutes }} -ne 0) { $budget = ${{ inputs.release_budget_minutes }} * 60 }
           $elapsed = ([DateTimeOffset]::UtcNow - $started).TotalSeconds
           $remaining = [int][Math]::Floor($budget - $elapsed)
           @{
@@ -256,7 +278,11 @@ jobs:
         id: release
         continue-on-error: ${{ inputs.feasibility }}
         run: |
-          python "$HARNESS_DIR/measure.py" --output "$RESULTS_DIR" --timeout "${RELEASE_BUDGET_SECONDS:-19800}" -- \
+          cache_args=()
+          if [ '${{ inputs.progressive_cache }}' = true ]; then
+            cache_args=(--sccache "$(cygpath -w "$(command -v sccache)")")
+          fi
+          python "$HARNESS_DIR/measure.py" --output "$RESULTS_DIR" --timeout "${RELEASE_BUDGET_SECONDS:-19800}" "${cache_args[@]}" -- \
             'C:\Program Files\Git\bin\bash.exe' --noprofile --norc -eo pipefail src/ci/scripts/run-build-from-ci.sh
       - name: Verify distribution and extracted compiler
         id: qualification
@@ -269,7 +295,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory "$env:GITHUB_WORKSPACE\results" -Force | Out-Null
-          if (Get-Command sccache -ErrorAction SilentlyContinue) {
+          if ('${{ inputs.progressive_cache }}' -eq 'true') {
+            $last = Get-Content "$env:RESULTS_DIR\cache-stats.jsonl" -Tail 1 | ConvertFrom-Json
+            if ($last.error -or -not $last.data) { throw 'Final live compiler-cache statistics are unavailable' }
+            $last.data | ConvertTo-Json -Depth 20 | Set-Content "$env:RESULTS_DIR\sccache.json"
+            $last | Select-Object reason,utc,elapsed_seconds |
+              ConvertTo-Json | Set-Content "$env:RESULTS_DIR\sccache-statistics-source.json"
+          } elseif (Get-Command sccache -ErrorAction SilentlyContinue) {
             sccache --show-stats --stats-format=json > "$env:GITHUB_WORKSPACE\results\sccache.json"
             $code = $LASTEXITCODE
             if ($code -ne 0) {
@@ -287,7 +319,7 @@ jobs:
         run: '& "$env:HARNESS_DIR\stop-cache.ps1" -OutputDirectory "$env:RESULTS_DIR"'
       - name: Save cache for matching restored run
         id: cache-snapshot
-        if: always() && inputs.cache == 'cold' && steps.cache-stop.outcome == 'success' && (success() || inputs.feasibility)
+        if: always() && (inputs.cache == 'cold' || inputs.save_restored_cache) && steps.cache-stop.outcome == 'success' && (success() || inputs.feasibility)
         timeout-minutes: 7
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -295,8 +327,13 @@ jobs:
           path: ${{ env.SCCACHE_DIR }}
           include-hidden-files: true
           compression-level: 0
-          retention-days: 3
+          retention-days: ${{ inputs.progressive_cache && 14 || 3 }}
           if-no-files-found: error
+      - name: Inventory the preserved progressive cache
+        if: always() && inputs.progressive_cache && steps.cache-stop.outcome == 'success'
+        run: |
+          python "$HARNESS_DIR/cache_inventory.py" --cache "$SCCACHE_DIR" \
+            --output "$RESULTS_DIR/cache-after-inventory.json" --before "$RESULTS_DIR/cache-before-inventory.json"
       - name: Record standalone feasibility outcome
         if: always() && inputs.feasibility
         shell: pwsh
@@ -313,6 +350,8 @@ jobs:
             recorded_at = [DateTimeOffset]::UtcNow.ToString('o')
             attempt_started_at = $env:FEASIBILITY_STARTED
             cache_artifact_id = '${{ steps.cache-snapshot.outputs.artifact-id }}'
+            cache_source_run = '${{ inputs.cache_run_id || github.run_id }}'
+            progressive_cache = [bool]::Parse('${{ inputs.progressive_cache }}')
             restores_build_outputs_or_profiles = $false
             restores_upstream_s3_cache = $false
           } | ConvertTo-Json | Set-Content "$env:RESULTS_DIR\feasibility.json"

@@ -1,0 +1,106 @@
+name: Standard Windows x64 progressive compiler cache
+
+on:
+  push:
+    branches: [experiment/windows-x64-progressive-cache]
+    paths:
+      - .github/workflows/windows-x64-progressive-cache.yml
+      - .github/workflows/windows-x64-refs-build.yml
+      - .github/x64-refs/**
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Run containing the preceding compiler-cache generation
+        type: string
+        required: true
+        default: '40168676329'
+      phase:
+        description: Warming saves the next cache; confirmation freezes the input cache
+        type: choice
+        options: [warming, confirmation]
+        default: warming
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: standard-x64-progressive-cache
+  cancel-in-progress: false
+
+jobs:
+  harness-check:
+    if: github.repository == 'marcpems/rust-arm64-compiler-ab' && github.event.repository.visibility == 'public'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    env:
+      SCCACHE_DIR: ${{ github.workspace }}\smoke-cache
+      SCCACHE_SERVER_PORT: '43230'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: .github/x64-refs
+      - name: Check measurement and inventory
+        run: python -m unittest discover -s .github/x64-refs -p "test_*.py"
+      - name: Verify live hit counters survive a real compiler-cache timeout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          curl.exe --fail --location --retry 3 https://ci-mirrors.rust-lang.org/rustc/2025-02-24-sccache-v0.10.0-x86_64-pc-windows-msvc.exe -o sccache.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download upstream sccache' }
+          $env:PATH = "$env:GITHUB_WORKSPACE;$env:PATH"
+          @'
+          import os
+          from pathlib import Path
+          import subprocess
+          import time
+          vswhere = Path(os.environ["ProgramFiles(x86)"]) / "Microsoft Visual Studio/Installer/vswhere.exe"
+          installation = subprocess.check_output([str(vswhere), "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"], text=True).strip()
+          if not installation:
+              raise RuntimeError("MSVC installation unavailable")
+          setup = Path(installation) / "VC/Auxiliary/Build/vcvars64.bat"
+          cache = str(Path("sccache.exe").resolve())
+          Path("cache-smoke.c").write_text("int square(int x) { return x*x; }\n")
+          compile_command = f'"{cache}" cl.exe /nologo /c cache-smoke.c /Focache-smoke.obj'
+          command = f'call "{setup}" >nul && {compile_command} && {compile_command}'
+          subprocess.run(f'"{os.environ["ComSpec"]}" /d /s /c "{command}"', check=True)
+          time.sleep(120)
+          '@ | Set-Content -Encoding utf8 smoke.py
+          python .github\x64-refs\measure.py --output smoke-results --timeout 30 --sccache "$env:GITHUB_WORKSPACE\sccache.exe" -- python smoke.py
+          if ($LASTEXITCODE -ne 124) { throw 'Expected a measured timeout after two real cached compilations' }
+          $global:LASTEXITCODE = 0
+          $records = @(Get-Content smoke-results\cache-stats.jsonl | ForEach-Object { $_ | ConvertFrom-Json })
+          $last = $records[-1]
+          if ($last.reason -ne 'before-timeout' -or $last.error -or $last.data.stats.compile_requests -lt 2) {
+            throw 'Pre-timeout compiler-cache counters are missing'
+          }
+          $hits = ($last.data.stats.cache_hits.counts.PSObject.Properties.Value | Measure-Object -Sum).Sum
+          if ($hits -lt 1) { throw 'Repeated compilation did not produce a real cache hit' }
+          & .github\x64-refs\stop-cache.ps1 -OutputDirectory smoke-results
+          python .github\x64-refs\cache_inventory.py --cache "$env:SCCACHE_DIR" --output smoke-results\cache-inventory.json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inventory the cache after timeout' }
+          if ((Get-Content smoke-results\cache-inventory.json -Raw | ConvertFrom-Json).files -lt 1) {
+            throw 'Timeout did not preserve compiler-cache entries'
+          }
+      - name: Preserve harness evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: progressive-cache-harness-check
+          path: smoke-results
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: harness-check
+    uses: ./.github/workflows/windows-x64-refs-build.yml
+    with:
+      variant: control
+      pair: 1
+      cache: restored
+      feasibility: true
+      progressive_cache: true
+      save_restored_cache: ${{ (inputs.phase || 'warming') == 'warming' }}
+      release_budget_minutes: ${{ (inputs.phase || 'warming') == 'warming' && 355 || 359 }}
+      cache_run_id: ${{ inputs.source_run || '40168676329' }}
+      source_revision: 4da678aada4683607acbd67a8da37a320c791f93

@@ -7,6 +7,7 @@ from pathlib import Path
 import queue
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -26,18 +27,57 @@ def cpu_seconds():
     return (kernel.value + user.value - idle.value) / 10_000_000
 
 
-def measure(command, output, timeout):
+def capture_cache_stats(job, executable, output, started, reason):
+    record = {
+        "elapsed_seconds": time.perf_counter() - started,
+        "utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "reason": reason,
+    }
+    process = job.start([executable, "--show-stats", "--stats-format=json"])
+    try:
+        text, _ = process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+        record["error"] = "Cache statistics request timed out"
+    else:
+        if process.returncode:
+            record["error"] = f"Cache statistics exit {process.returncode}: {text}"
+        else:
+            try:
+                record["data"] = json.loads(text)
+            except json.JSONDecodeError as error:
+                record["error"] = f"Invalid cache statistics JSON: {error}"
+    with (output / "cache-stats.jsonl").open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record) + "\n")
+    if "error" in record:
+        print(record["error"], file=sys.stderr, flush=True)
+    return record
+
+
+def measure(command, output, timeout, sccache=None):
     with ProcessJob() as job:
-        return measure_job(command, output, timeout, job)
+        return measure_job(command, output, timeout, job, sccache)
 
 
-def measure_job(command, output, timeout, job):
+def measure_job(command, output, timeout, job, sccache=None):
     output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     start_cpu = cpu_seconds()
     started_at = dt.datetime.now(dt.timezone.utc).isoformat()
     events = []
     lines = queue.Queue()
+    if sccache:
+        server = job.start([sccache, "--start-server"])
+        try:
+            text, _ = server.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.communicate()
+            raise RuntimeError("Cannot start the measured compiler-cache server within15s")
+        if server.returncode:
+            raise RuntimeError(f"Cannot start the measured compiler-cache server: {text}")
+        capture_cache_stats(job, sccache, output, started, "initial")
     process = job.start(command)
 
     def reader():
@@ -48,6 +88,7 @@ def measure_job(command, output, timeout, job):
     thread = threading.Thread(target=reader, daemon=True)
     thread.start()
     next_sample = 0
+    next_cache_sample = 300
     timed_out = False
     with (output / "release.log").open("w", encoding="utf-8") as log, (
         output / "resources.jsonl"
@@ -57,7 +98,12 @@ def measure_job(command, output, timeout, job):
             elapsed = time.perf_counter() - started
             if elapsed >= timeout and not timed_out:
                 timed_out = True
+                if sccache:
+                    capture_cache_stats(job, sccache, output, started, "before-timeout")
                 job.terminate()
+            if sccache and not timed_out and elapsed >= next_cache_sample:
+                capture_cache_stats(job, sccache, output, started, "periodic")
+                next_cache_sample = time.perf_counter() - started + 300
             if elapsed >= next_sample:
                 resources.write(json.dumps({
                     "elapsed_seconds": elapsed, "utc": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -87,6 +133,8 @@ def measure_job(command, output, timeout, job):
                 (output / "sections.json").write_text(json.dumps(events, indent=2))
     code = process.wait()
     thread.join()
+    if sccache and not timed_out:
+        capture_cache_stats(job, sccache, output, started, "completed")
     record = {
         "command": command, "started_at": started_at,
         "finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -111,9 +159,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--timeout", type=int, default=19800)
+    parser.add_argument("--sccache")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("A command is required")
-    raise SystemExit(measure(command, args.output, args.timeout))
+    raise SystemExit(measure(command, args.output, args.timeout, args.sccache))
