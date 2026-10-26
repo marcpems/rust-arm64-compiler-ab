@@ -1,0 +1,121 @@
+{
+  "assessment_date": "2026-10-26",
+  "assessment": "Full standard-runner release feasibility not confirmed",
+  "qualified_successes": 0,
+  "scope": "Full Windows x64 Rust release with the static-LLVM PGO repair, including fresh PGO training, distribution generation and upstream artifact tests in one standard GitHub-hosted job.",
+  "repository": "marcpems/rust-arm64-compiler-ab",
+  "source_revision": "4da678aada4683607acbd67a8da37a320c791f93",
+  "source_patch": ".github/x64-refs/bootstrap-runtime-probe.patch",
+  "equivalent_pr_head": "9184323ab1bc8191ef37a6cada421026b0d9f7c0",
+  "pgo_pr": "https://github.com/rust-lang/rust/pull/164707",
+  "restored_replay_harness_revision": "5e5b8a578d474d6c55979f6af866c30c57cfe240",
+  "runner": {
+    "label": "windows-2025",
+    "logical_processors": 4,
+    "memory_gib_approx": 16,
+    "image_version": "20261021.278.1",
+    "filesystem": "Untreated NTFS",
+    "storage_bus": "SAS",
+    "hardware_selection": false
+  },
+  "budgets_minutes": {
+    "github_job_limit": 360,
+    "cold_setup_inclusive_release_deadline": 350,
+    "restored_setup_inclusive_release_deadline": 355
+  },
+  "compiler_cache": {
+    "type": "Local sccache artifact from a preceding incomplete cold attempt",
+    "source_run": 40168676329,
+    "source_job": 121094889245,
+    "artifact_id": 12598711742,
+    "restored_files": 6969,
+    "same_cache_for_all_three_restored_attempts": true,
+    "transferred_build_outputs_or_profiles": false,
+    "upstream_s3_cache_used": false
+  },
+  "cold_attempts": [
+    {
+      "run": 40140100420,
+      "job": 121009844319,
+      "cpu": "AMD EPYC 7763",
+      "outcome": "Deadline during final LLVM compilation, after both PGO stages; no distribution completion",
+      "qualification": false,
+      "cache_handoff": "Failed because a redundant cache-stop operation ran after timeout cleanup; repaired before the next attempt"
+    },
+    {
+      "run": 40168676329,
+      "job": 121094889245,
+      "cpu": "AMD EPYC 7763",
+      "outcome": "Deadline; no qualified full release",
+      "qualification": false,
+      "cache_handoff": "Succeeded; supplied the compiler cache for the restored attempts"
+    }
+  ],
+  "restored_attempts": [
+    {
+      "run": 40168676329,
+      "job": 121164551261,
+      "url": "https://github.com/marcpems/rust-arm64-compiler-ab/actions/runs/40168676329/job/121164551261",
+      "cpu": "Intel Xeon Platinum 8573C",
+      "stage_1_minutes": 140.62033333333332,
+      "stage_2_minutes": 43.00483333333333,
+      "stage_5_minutes": 121.75716666666668,
+      "setup_through_distribution_minutes": 315.60714305,
+      "whole_job_minutes": 325.93333333333334,
+      "distribution_completed": true,
+      "qualification": false,
+      "outcome": "Harness CP1252 Unicode output exception interrupted artifact tests; not a timeout or demonstrated compiler failure. Fixed in the replay harness. No final release.json was written; distribution milestone is preserved in sections.json."
+    },
+    {
+      "run": 40217607366,
+      "job": 121242049913,
+      "url": "https://github.com/marcpems/rust-arm64-compiler-ab/actions/runs/40217607366/job/121242049913",
+      "cpu": "AMD EPYC 7763",
+      "stage_1_minutes": 152.58266666666665,
+      "stage_2_minutes": 47.12433333333333,
+      "stage_5_minutes": 136.31033333333332,
+      "setup_through_distribution_minutes": 346.84521506666664,
+      "whole_job_minutes": 355.4166666666667,
+      "artifact_tests_observed_minutes": 8.218980616666666,
+      "distribution_completed": true,
+      "qualification": false,
+      "outcome": "Deadline during upstream UI tests. release.json records exit124 and timed_out=true; no logger exception."
+    },
+    {
+      "run": 40286102352,
+      "job": 121450031499,
+      "url": "https://github.com/marcpems/rust-arm64-compiler-ab/actions/runs/40286102352/job/121450031499",
+      "cpu": "AMD EPYC 7763",
+      "stage_1_minutes": 159.95683333333332,
+      "stage_2_minutes": 47.1285,
+      "stage_5_minutes": null,
+      "stage_5_observed_before_timeout_minutes": 136.78756168333334,
+      "setup_through_distribution_minutes": null,
+      "whole_job_minutes": 355.3833333333333,
+      "distribution_completed": false,
+      "qualification": false,
+      "outcome": "Deadline while WiX light.exe was building the MSI installer. No successful final-build milestone; artifact tests had not started."
+    }
+  ],
+  "conclusions": [
+    "Distribution generation with the PGO repair has been observed inside360min on both Intel and AMD standard runners with this restored compiler cache.",
+    "No attempt completed all required release and artifact-test qualification. Restoring this cache is therefore not demonstrated to make the full job fit reliably.",
+    "The Intel result is promising but incomplete because of the repaired harness error; it is not a fully qualified existence proof.",
+    "Two independent AMD restored attempts missed the declared355min release budget. No further unchanged repeats were dispatched after the second AMD result.",
+    "Do not use these results to justify moving the full upstream release to the standard four-processor pool. Retain the upstream runner capacity until a separately qualified alternative exists."
+  ],
+  "limitations": [
+    "A355min evidence-preserving cutoff is not the360min platform limit. These results do not prove every standard-runner allocation must fail at360min.",
+    "The cache contains entries from one incomplete cold attempt, not a fully warmed persistent upstream S3 cache. Do not generalize this cache condition to routine upstream CI.",
+    "Processor and allocation differences prevent treating these runs as paired cache-speedup or storage-speedup measurements.",
+    "PGO stage durations include compilation and profile-training work; they are not raw process-tree CPU measurements.",
+    "Historical upstream release timings used eight logical processors,32GB and a different cache condition; they do not establish a standard-runner baseline.",
+    "Post-timeout cache statistics cannot be assumed to represent the terminated build server.",
+    "No MSI installation or upgrade qualification was performed."
+  ],
+  "further_work": [
+    "An explicitly Intel-conditioned standard-runner attempt could address the remaining conditional existence question, but would not establish reliability across the standard pool.",
+    "A stronger compiler-cache condition would need separately recorded seeding and provenance, while preserving fresh training and no transferred build outputs or profiles.",
+    "The x64 storage comparison remains unqualified; this assessment is not an x64 NVMe or ReFS performance result."
+  ]
+}
