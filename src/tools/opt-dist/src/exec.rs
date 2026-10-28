@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::process::{Command, Stdio};
 
@@ -13,10 +14,13 @@ use crate::training::{
 };
 use crate::utils::io::normalize_path;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Default)]
 pub struct CmdBuilder {
     args: Vec<String>,
-    env: BTreeMap<String, String>,
+    env: BTreeMap<String, OsString>,
     workdir: Option<Utf8PathBuf>,
     output: Option<Utf8PathBuf>,
 }
@@ -27,8 +31,8 @@ impl CmdBuilder {
         self
     }
 
-    pub fn env(mut self, name: &str, value: &str) -> Self {
-        self.env.insert(name.to_string(), value.to_string());
+    pub fn env(mut self, name: &str, value: impl AsRef<OsStr>) -> Self {
+        self.env.insert(name.to_string(), value.as_ref().to_os_string());
         self
     }
 
@@ -48,7 +52,7 @@ impl CmdBuilder {
             &self
                 .env
                 .iter()
-                .map(|(key, value)| format!("{key}={value}"))
+                .map(|(key, value)| format!("{key}={}", value.to_string_lossy()))
                 .collect::<Vec<_>>()
                 .join(" "),
         );
@@ -163,14 +167,24 @@ impl Bootstrap {
         self
     }
 
-    pub fn llvm_pgo_optimize(mut self, profile: Option<&LlvmPGOProfile>) -> Self {
+    pub fn llvm_pgo_optimize(mut self, profile: Option<&LlvmPGOProfile>) -> anyhow::Result<Self> {
         if let Some(prof) = profile {
             self.cmd = self
                 .cmd
                 .arg("--set")
                 .arg(format!(r#"pgo.llvm.use="{}""#, normalize_path(&prof.0).as_str()));
+            if cfg!(windows) {
+                let extra_files = std::env::var_os("SCCACHE_EXTRAFILES");
+                let paths = extra_files
+                    .as_ref()
+                    .map(std::env::split_paths)
+                    .into_iter()
+                    .flatten()
+                    .chain(std::iter::once(prof.0.clone().into_std_path_buf()));
+                self.cmd = self.cmd.env("SCCACHE_EXTRAFILES", std::env::join_paths(paths)?);
+            }
         }
-        self
+        Ok(self)
     }
 
     pub fn without_llvm_lto(mut self) -> Self {
