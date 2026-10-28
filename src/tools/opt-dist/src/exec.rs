@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::process::{Command, Stdio};
 
@@ -14,13 +13,10 @@ use crate::training::{
 };
 use crate::utils::io::normalize_path;
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Default)]
 pub struct CmdBuilder {
     args: Vec<String>,
-    env: BTreeMap<String, OsString>,
+    env: BTreeMap<String, String>,
     workdir: Option<Utf8PathBuf>,
     output: Option<Utf8PathBuf>,
 }
@@ -31,8 +27,8 @@ impl CmdBuilder {
         self
     }
 
-    pub fn env(mut self, name: &str, value: impl AsRef<OsStr>) -> Self {
-        self.env.insert(name.to_string(), value.as_ref().to_os_string());
+    pub fn env(mut self, name: &str, value: &str) -> Self {
+        self.env.insert(name.to_string(), value.to_string());
         self
     }
 
@@ -52,7 +48,7 @@ impl CmdBuilder {
             &self
                 .env
                 .iter()
-                .map(|(key, value)| format!("{key}={}", value.to_string_lossy()))
+                .map(|(key, value)| format!("{key}={value}"))
                 .collect::<Vec<_>>()
                 .join(" "),
         );
@@ -159,12 +155,21 @@ impl Bootstrap {
         Self { cmd, metrics_path }
     }
 
-    pub fn llvm_pgo_instrument(mut self, profile_dir: &Utf8Path) -> Self {
-        self.cmd = self.cmd.arg("--set").arg(format!(
+    pub fn llvm_pgo_instrument(
+        env: &Environment,
+        profile_dir: &Utf8Path,
+        rustc_profile: &RustcPGOProfile,
+    ) -> Self {
+        let mut builder = Self::build(env);
+        builder.cmd = builder.cmd.arg("--set").arg(format!(
             r#"pgo.llvm.generate="{}""#,
             normalize_path(&profile_dir.join("prof-%p")).as_str()
         ));
-        self
+        if env.supports_shared_llvm() {
+            builder.avoid_rustc_rebuild()
+        } else {
+            builder.rustc_pgo_optimize(rustc_profile).rustc_rebuild()
+        }
     }
 
     pub fn llvm_pgo_optimize(mut self, profile: Option<&LlvmPGOProfile>) -> anyhow::Result<Self> {
@@ -174,14 +179,14 @@ impl Bootstrap {
                 .arg("--set")
                 .arg(format!(r#"pgo.llvm.use="{}""#, normalize_path(&prof.0).as_str()));
             if cfg!(windows) {
-                let extra_files = std::env::var_os("SCCACHE_EXTRAFILES");
-                let paths = extra_files
-                    .as_ref()
-                    .map(std::env::split_paths)
-                    .into_iter()
-                    .flatten()
-                    .chain(std::iter::once(prof.0.clone().into_std_path_buf()));
-                self.cmd = self.cmd.env("SCCACHE_EXTRAFILES", std::env::join_paths(paths)?);
+                let mut paths = std::env::var_os("SCCACHE_EXTRAFILES")
+                    .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                paths.push(prof.0.clone().into_std_path_buf());
+                let extra_files = std::env::join_paths(paths)?
+                    .into_string()
+                    .map_err(std::env::VarError::NotUnicode)?;
+                self.cmd = self.cmd.env("SCCACHE_EXTRAFILES", &extra_files);
             }
         }
         Ok(self)
@@ -330,3 +335,6 @@ fn add_shared_x_flags(env: &Environment, cmd: CmdBuilder) -> CmdBuilder {
         cmd
     }
 }
+
+#[cfg(test)]
+mod tests;
