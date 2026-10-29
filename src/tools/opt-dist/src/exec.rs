@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::process::{Command, Stdio};
 
+use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::environment::Environment;
@@ -183,9 +184,11 @@ impl Bootstrap {
                     .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
                     .unwrap_or_default();
                 paths.push(prof.0.clone().into_std_path_buf());
-                let extra_files = std::env::join_paths(paths)?
+                let extra_files = std::env::join_paths(paths)
+                    .context("SCCACHE_EXTRAFILES")?
                     .into_string()
-                    .map_err(std::env::VarError::NotUnicode)?;
+                    .map_err(std::env::VarError::NotUnicode)
+                    .context("SCCACHE_EXTRAFILES")?;
                 self.cmd = self.cmd.env("SCCACHE_EXTRAFILES", &extra_files);
             }
         }

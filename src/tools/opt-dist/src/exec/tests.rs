@@ -59,4 +59,9 @@ fn llvm_profile_cache_input() {
         inherited.as_ref().map(std::env::split_paths).into_iter().flatten().collect::<Vec<_>>()
     );
     assert!(build().llvm_pgo_optimize(None).unwrap().cmd.env.is_empty());
+
+    let invalid_profile = LlvmPGOProfile(Utf8PathBuf::from("invalid\"profile"));
+    let error = build().llvm_pgo_optimize(Some(&invalid_profile)).err().unwrap();
+    assert_eq!(error.to_string(), "SCCACHE_EXTRAFILES");
+    assert!(error.downcast_ref::<std::env::JoinPathsError>().is_some());
 }
