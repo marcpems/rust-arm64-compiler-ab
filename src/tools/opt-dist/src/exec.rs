@@ -178,6 +178,8 @@ impl Bootstrap {
                 .cmd
                 .arg("--set")
                 .arg(format!(r#"pgo.llvm.use="{}""#, normalize_path(&prof.0).as_str()));
+            // Allow passthrough of the profdata content to the cache extra files to mitigate sccache issue with msvc profile flags 
+            // This can be removed when sccache https://github.com/mozilla/sccache/issues/2964 is resolved and in use by Rust build. 
             if cfg!(windows) {
                 let mut paths = std::env::var_os("SCCACHE_EXTRAFILES")
                     .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
