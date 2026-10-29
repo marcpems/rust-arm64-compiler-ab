@@ -1,0 +1,74 @@
+name: Windows Rust compiler emulation experiment
+
+on:
+  push:
+    branches: [experiment/windows-compiler-emulation]
+    paths:
+      - .github/workflows/windows-compiler-emulation.yml
+      - .github/compiler-emulation/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-compiler-emulation-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  harness:
+    if: github.repository == 'marcpems/rust-arm64-compiler-ab'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          sparse-checkout: .github/compiler-emulation
+          persist-credentials: false
+      - run: python -m unittest discover -s .github/compiler-emulation -p "test_*.py" -v
+
+  benchmark:
+    needs: harness
+    if: github.repository == 'marcpems/rust-arm64-compiler-ab'
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [arm64, x64]
+        replicate: [1, 2, 3]
+    runs-on: ${{ matrix.host == 'arm64' && 'windows-11-arm' || 'windows-2025' }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          sparse-checkout: .github/compiler-emulation
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: BurntSushi/ripgrep
+          ref: 4649aa9700619f94cf9c66876e9549d83420e16c
+          path: workload
+          persist-credentials: false
+      - name: Run paired clean compilation and unit-integration tests
+        env:
+          BENCHMARK_HOST: ${{ matrix.host }}
+          BENCHMARK_REPLICATE: ${{ matrix.replicate }}
+          HOST_ENVIRONMENT: ${{ runner.environment }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:HOST_ENVIRONMENT -ne 'github-hosted') { throw 'runner-environment' }
+          python .github\compiler-emulation\benchmark.py `
+            --host $env:BENCHMARK_HOST --replicate $env:BENCHMARK_REPLICATE `
+            --source workload --work "$env:RUNNER_TEMP\compiler-emulation" `
+            --output results
+          if ($LASTEXITCODE -ne 0) { throw 'benchmark-failed' }
+      - name: Preserve raw timings, toolchain identities and test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: compiler-emulation-${{ matrix.host }}-${{ matrix.replicate }}
+          path: results
+          if-no-files-found: error
+          retention-days: 30
