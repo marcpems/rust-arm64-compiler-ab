@@ -1,0 +1,52 @@
+name: Rust CI sccache 0.20.1 qualification
+on:
+  push:
+    branches: [test/sccache-0.20.1-pr158609]
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install release with candidate Rust CI script
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            (cd "$RUNNER_TEMP" && sudo sh "$GITHUB_WORKSPACE/src/ci/docker/scripts/sccache.sh")
+          else
+            bash src/ci/scripts/install-sccache.sh
+          fi
+      - name: Verify installed tool
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == macOS || "$RUNNER_OS" == Linux ]]; then
+            echo /usr/local/bin >> "$GITHUB_PATH"
+            export PATH=/usr/local/bin:$PATH
+          fi
+          which sccache
+          test "$(sccache --version)" = "sccache 0.20.1"
+      - name: Check clang-cl profile cache key
+        if: runner.os == 'Windows'
+        run: python .github/workflows/test-sccache-pgo.py
+      - name: Cold and warm builds of Rust bootstrap
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: 0
+          RUSTC_WRAPPER: sccache
+        run: |
+          rustup toolchain install beta-2026-11-10 --profile minimal
+          export RUSTUP_TOOLCHAIN=beta-2026-11-10
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/qualification-target"
+          sccache --zero-stats
+          cargo build --locked --manifest-path src/bootstrap/Cargo.toml --bin bootstrap
+          cargo clean --manifest-path src/bootstrap/Cargo.toml
+          sccache --zero-stats
+          cargo build --locked --manifest-path src/bootstrap/Cargo.toml --bin bootstrap
+          sccache --show-stats
+          sccache --show-stats --stats-format=json | python -c "import json,sys; assert json.load(sys.stdin)['stats']['cache_hits']['counts'].get('Rust', 0) > 0"
