@@ -11,9 +11,11 @@ jobs:
       matrix:
         os: [windows-2022, ubuntu-24.04, ubuntu-24.04-arm, macos-15]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 32
       - name: Install release with candidate Rust CI script
         shell: bash
         run: |
@@ -50,3 +52,12 @@ jobs:
           cargo build --locked --manifest-path src/bootstrap/Cargo.toml --bin bootstrap
           sccache --show-stats
           sccache --show-stats --stats-format=json | python -c "import json,sys; assert json.load(sys.stdin)['stats']['cache_hits']['counts'].get('Rust', 0) > 0"
+      - name: Build stage 1 rustc on Windows with the candidate cache
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          RUSTC_WRAPPER: sccache
+          CARGO_INCREMENTAL: 0
+        run: |
+          python x.py build --stage 1 compiler/rustc --set llvm.download-ci-llvm=true --set rust.download-rustc=false --set rust.debuginfo-level=0
+          build/x86_64-pc-windows-msvc/stage1/bin/rustc.exe -vV

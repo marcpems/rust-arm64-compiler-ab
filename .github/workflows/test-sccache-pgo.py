@@ -20,10 +20,8 @@ with tempfile.TemporaryDirectory() as work:
         Path("test.c").write_text("int main(int argc, char **argv) { return argc > 1; }\n")
         run(clang, "/O2", "-clang:-fprofile-generate", "test.c", "/Fetrain.exe")
         for n in (1, 2):
-            env = dict(os.environ, LLVM_PROFILE_FILE=f"{n}.profraw")
-            for _ in range(n):
-                run(str(Path("train.exe").resolve()), env=env)
-            run(profdata, "merge", f"{n}.profraw", "-o", f"{n}.profdata")
+            run(str(Path("train.exe").resolve()), env=dict(os.environ, LLVM_PROFILE_FILE=f"{n}.profraw"))
+            run(profdata, "merge", *[f"{i}.profraw" for i in range(1, n + 1)], "-o", f"{n}.profdata")
         assert Path("1.profdata").read_bytes() != Path("2.profdata").read_bytes()
         shutil.copyfile("1.profdata", "use.profdata")
         for label, hits, misses in [("cold", 0, 1), ("unchanged", 1, 0), ("replaced", 0, 1)]:
